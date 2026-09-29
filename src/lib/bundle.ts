@@ -1,0 +1,135 @@
+/**
+ * Construye el documento HTML autocontenido que se renderiza en el iframe
+ * sandbox: incrusta CSS/JS locales, resuelve assets de texto (SVG, JSON),
+ * inyecta dependencias detectadas y un puente de consola hacia el editor.
+ */
+import type { FileMap } from "../../shared/types";
+import { detectDependencies, getDependencyTags, injectTags } from "../../shared/dependencies";
+
+export const BRIDGE_FLAG = "__devstudio";
+
+const MIME: Record<string, string> = {
+  svg: "image/svg+xml",
+  json: "application/json",
+  txt: "text/plain",
+  css: "text/css",
+  js: "text/javascript",
+  mjs: "text/javascript",
+  html: "text/html",
+  xml: "application/xml",
+  md: "text/markdown",
+};
+
+export function resolveLocalPath(ref: string, fromPage: string, files: FileMap): string | null {
+  const clean = ref.trim().split("#")[0].split("?")[0];
+  if (!clean || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(clean)) return null; // URL absoluta o con esquema
+  const dir = fromPage.includes("/") ? fromPage.slice(0, fromPage.lastIndexOf("/") + 1) : "";
+  let path: string;
+  try {
+    path = decodeURIComponent(new URL(clean, `http://project.local/${clean.startsWith("/") ? "" : dir}`).pathname.slice(1));
+  } catch {
+    return null;
+  }
+  return path in files ? path : null;
+}
+
+function toDataUrl(path: string, content: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "txt";
+  const mime = MIME[ext] ?? "text/plain";
+  return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
+}
+
+const escapeForTag = (content: string, tag: "script" | "style") => content.replace(new RegExp(`</${tag}`, "gi"), `<\\/${tag}`);
+
+/** Script inyectado en el iframe: reenvía consola/errores y navegación entre páginas locales. */
+function bridgeScript(pages: string[]): string {
+  return `<script>(function(){
+  var F=${JSON.stringify(BRIDGE_FLAG)}, pages=${JSON.stringify(pages)};
+  function ser(v){try{if(v instanceof Error)return v.name+': '+v.message;if(typeof v==='object'&&v!==null){var s=JSON.stringify(v,null,1);return s&&s.length>2000?s.slice(0,2000)+'…':s}return String(v)}catch(e){return String(v)}}
+  function send(level,args){try{parent.postMessage({flag:F,type:'console',level:level,args:Array.prototype.map.call(args,ser)},'*')}catch(e){}}
+  ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){send(l,arguments);return o&&o.apply(console,arguments)}});
+  window.addEventListener('error',function(e){send('error',[e.message+(e.lineno?' (línea '+e.lineno+')':'')])});
+  window.addEventListener('unhandledrejection',function(e){send('error',['Promesa rechazada: '+ser(e.reason)])});
+  document.addEventListener('click',function(e){
+    var a=e.target&&e.target.closest?e.target.closest('a[href]'):null; if(!a)return;
+    var href=a.getAttribute('href')||''; if(/^#/.test(href))return;
+    var clean=href.split('#')[0].split('?')[0].replace(/^\\.\\//,'').replace(/^\\//,'');
+    if(pages.indexOf(clean)!==-1){e.preventDefault();parent.postMessage({flag:F,type:'navigate',path:clean},'*');}
+    else if(!/^[a-z]+:/i.test(href)&&!/^\\/\\//.test(href)){e.preventDefault();send('warn',['Enlace local no encontrado en el proyecto: '+href]);}
+  },true);
+})();</script>`;
+}
+
+export interface BuildOptions {
+  page?: string;
+  autoInjectDeps?: boolean;
+  bridge?: boolean;
+}
+
+export function findEntry(files: FileMap): string | null {
+  if ("index.html" in files) return "index.html";
+  return Object.keys(files).find((p) => /\.html?$/i.test(p)) ?? null;
+}
+
+export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): string {
+  const { autoInjectDeps = true, bridge = true } = opts;
+  const page = opts.page && opts.page in files ? opts.page : findEntry(files);
+  const pages = Object.keys(files).filter((p) => /\.html?$/i.test(p));
+
+  let html: string;
+  if (!page) {
+    // Proyecto sin HTML: se crea un documento que carga todo el CSS y JS.
+    const css = Object.entries(files).filter(([p]) => p.endsWith(".css")).map(([, c]) => `<style>${escapeForTag(c, "style")}</style>`);
+    const js = Object.entries(files).filter(([p]) => /\.m?js$/.test(p)).map(([, c]) => `<script>${escapeForTag(c, "script")}</script>`);
+    html = `<!doctype html><html><head><meta charset="utf-8">${css.join("")}</head><body>${js.join("")}</body></html>`;
+  } else {
+    html = files[page];
+    const from = page;
+
+    // <link rel="stylesheet" href="local.css"> → <style>
+    html = html.replace(/<link\b[^>]*>/gi, (tag) => {
+      if (!/rel\s*=\s*["']?[^"'>]*stylesheet/i.test(tag)) return tag;
+      const href = tag.match(/href\s*=\s*["']([^"']+)["']/i)?.[1];
+      const local = href ? resolveLocalPath(href, from, files) : null;
+      if (!local) return tag;
+      const media = tag.match(/media\s*=\s*["']([^"']+)["']/i)?.[1];
+      return `<style data-file="${local}"${media ? ` media="${media}"` : ""}>\n${escapeForTag(files[local], "style")}\n</style>`;
+    });
+
+    // <script src="local.js"></script> → <script>
+    html = html.replace(/<script\b([^>]*)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (tag, pre: string, src: string, post: string) => {
+      const local = resolveLocalPath(src, from, files);
+      if (!local) return tag;
+      const attrs = `${pre} ${post}`.replace(/\s+(?:defer|async)\b/gi, "").trim();
+      return `<script data-file="${local}"${attrs ? " " + attrs : ""}>\n${escapeForTag(files[local], "script")}\n</script>`;
+    });
+
+    // Otros assets locales de texto (img src="logo.svg", etc.) → data URL
+    html = html.replace(/\b(src|href|poster|data)\s*=\s*(["'])([^"']+)\2/gi, (m, attr: string, q: string, ref: string) => {
+      const local = resolveLocalPath(ref, from, files);
+      if (!local || /\.html?$/i.test(local)) return m;
+      return `${attr}=${q}${toDataUrl(local, files[local])}${q}`;
+    });
+  }
+
+  if (autoInjectDeps) {
+    const missing = detectDependencies(files).filter((d) => !d.included);
+    const head: string[] = [];
+    const body: string[] = [];
+    for (const d of missing) {
+      const tags = getDependencyTags(d.id, files);
+      head.push(...tags.head);
+      body.push(...tags.body);
+    }
+    if (head.length || body.length) html = injectTags(html, head, body);
+  }
+
+  if (bridge) {
+    const script = bridgeScript(pages);
+    if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${script}`);
+    else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => `${m}<head>${script}</head>`);
+    else html = script + html;
+  }
+  if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>\n${html}`;
+  return html;
+}
