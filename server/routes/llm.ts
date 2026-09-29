@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatRequest, ChatStreamEvent } from "../../shared/types";
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
-import { REFERENCE_PROMPT, SYSTEM_PROMPT } from "../lib/prompts";
+import { REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext } from "../lib/prompts";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
@@ -13,23 +13,6 @@ export const llmRouter = Router();
 
 function sse(res: Response, event: ChatStreamEvent) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
-function buildFilesContext(files: ChatRequest["files"], activeFile?: string): string {
-  const entries = Object.entries(files ?? {});
-  if (!entries.length) return "El proyecto está vacío.";
-  let total = 0;
-  const parts: string[] = [];
-  for (const [path, content] of entries) {
-    total += content.length;
-    if (total > MAX_FILE_CHARS) {
-      throw new Error(
-        `El proyecto supera ${MAX_FILE_CHARS.toLocaleString("es")} caracteres; reduce el tamaño de los ficheros (p. ej. elimina CSS no usado) antes de enviarlo al asistente.`,
-      );
-    }
-    parts.push(`<current_file path="${path}">\n${content}\n</current_file>`);
-  }
-  return `Ficheros actuales del proyecto${activeFile ? ` (el usuario está editando ${activeFile})` : ""}:\n\n${parts.join("\n\n")}`;
 }
 
 function buildMessages(body: ChatRequest): Anthropic.Beta.BetaMessageParam[] {
@@ -51,7 +34,7 @@ function buildMessages(body: ChatRequest): Anthropic.Beta.BetaMessageParam[] {
       content.push({ type: "text", text: `${att.label ? `Adjunto "${att.label}":\n` : ""}${att.text}` });
     }
   }
-  content.push({ type: "text", text: buildFilesContext(body.files, body.activeFile) });
+  content.push({ type: "text", text: buildFilesContext(body.files, body.activeFile, MAX_FILE_CHARS) });
   content.push({ type: "text", text: `Petición del usuario:\n${body.prompt}` });
   messages.push({ role: "user", content });
   return messages;

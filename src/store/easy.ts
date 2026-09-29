@@ -10,7 +10,7 @@ import { processReferenceFile } from "../lib/media";
 import { countImages, MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
 import { readZip } from "../lib/zip";
 import { useChat } from "./chat";
-import { useStudio } from "./studio";
+import { aiAvailable, needsApiKey, useStudio } from "./studio";
 
 export type Mode = "easy" | "advanced";
 export type Stage = "start" | "working" | "result";
@@ -29,6 +29,8 @@ export interface Job {
   error?: string;
   /** Falta la clave de la IA: la pantalla pide la clave y permite reintentar */
   needsKey?: boolean;
+  /** false cuando reintentar daría el mismo error (p. ej. formato no soportado) */
+  canRetry?: boolean;
   /** Aviso informativo sobre el resultado */
   note?: string;
   usesAi: boolean;
@@ -114,11 +116,6 @@ export const useEasy = create<EasyState>((set, get) => {
     set({ stage: "result", notes });
   };
 
-  const aiReady = () => {
-    const { settings, health } = useStudio.getState();
-    return Boolean(settings.anthropicApiKey || health?.hasEnvApiKey);
-  };
-
   return {
     mode: readMode(),
     stage: "start",
@@ -168,6 +165,19 @@ export const useEasy = create<EasyState>((set, get) => {
       lastInput = { kind: "url", url: typed };
       abortController = new AbortController();
       const host = new URL(url).hostname;
+      if (!useStudio.getState().health) {
+        set({
+          stage: "working",
+          job: { kind: "url", title: `Clonar ${host}`, usesAi: false, steps: [{ label: "Descargando la página", state: "active" }] },
+        });
+        fail(
+          useStudio.getState().ai === "claude"
+            ? "Desde el navegador no se pueden descargar otras webs. Haz una captura de pantalla de la web y súbela: la IA la clonará."
+            : "Clonar por enlace necesita la app en tu ordenador (npm run dev). Mientras tanto, puedes subir una captura de la web.",
+          { canRetry: false },
+        );
+        return;
+      }
       set({
         stage: "working",
         job: {
@@ -231,6 +241,7 @@ export const useEasy = create<EasyState>((set, get) => {
         set({ stage: "working", job: { kind: "files", title, usesAi: false, steps: [{ label: "Leyendo tus archivos", state: "active" }] } });
         fail(
           `No sé leer ${unsupported.map((f) => `«${f.name}»`).join(", ")}. Sube capturas (PNG, JPG), vídeos (MP4, WEBM), PDF, SVG, páginas HTML o un ZIP.`,
+          { canRetry: false },
         );
         return;
       }
@@ -289,12 +300,16 @@ export const useEasy = create<EasyState>((set, get) => {
           ],
         },
       });
-      if (!studio.health) {
-        fail("Para clonar desde imágenes o vídeos hace falta el servidor local. Ábrelo con «npm run dev» y vuelve a intentarlo.");
+      if (needsApiKey(studio)) {
+        fail("Para clonar desde imágenes, vídeos o documentos necesitas conectar la IA (solo una vez).", { needsKey: true });
         return;
       }
-      if (!aiReady()) {
-        fail("Para clonar desde imágenes, vídeos o documentos necesitas conectar la IA (solo una vez).", { needsKey: true });
+      if (!aiAvailable(studio)) {
+        fail("La IA no está disponible aquí. Abre esta página desde claude.ai o usa la app en tu ordenador (npm run dev).");
+        return;
+      }
+      if (studio.ai === "claude" && visuals.some((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name)) && visuals.every((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name))) {
+        fail("La versión web no puede leer PDF. Haz una captura de la página del PDF y súbela como imagen.", { canRetry: false });
         return;
       }
 
@@ -354,7 +369,7 @@ export const useEasy = create<EasyState>((set, get) => {
 });
 
 function friendlyUrlError(message: string): string {
-  if (/servidor local/i.test(message)) return "No se puede clonar sin el servidor local. Ábrelo con «npm run dev» y vuelve a intentarlo.";
+  if (/servidor local/i.test(message)) return "No se puede clonar por enlace sin la app en tu ordenador (npm run dev). Puedes subir una captura de la web.";
   if (/resolver el dominio/i.test(message)) return "No encuentro esa web. Revisa que la dirección esté bien escrita.";
   if (/red privada|local bloqueado/i.test(message)) return "Esa dirección apunta a tu red local y está bloqueada por seguridad.";
   if (/Tiempo de espera/i.test(message)) return "La web tardó demasiado en responder. Inténtalo de nuevo en un momento.";

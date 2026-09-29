@@ -76,6 +76,7 @@ export function ChatPanel() {
   const { messages, streaming, streamText, status } = useChat();
   const { send, stop, clear } = useChat.getState();
   const activeFile = useStudio((s) => s.project?.activeFile);
+  const ai = useStudio((s) => s.ai);
   const [input, setInput] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -96,7 +97,7 @@ export function ChatPanel() {
   return (
     <div className="tool-body flush">
       <div className="chat-log" ref={logRef} aria-live="polite">
-        <ServerNotice feature="el asistente de código" />
+        {ai !== "claude" && <ServerNotice feature="el asistente de código" />}
         {messages.length === 0 && !streaming && (
           <div className="empty">
             <Icon name="sparkles" size={28} />

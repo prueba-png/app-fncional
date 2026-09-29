@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useStudio, IS_DEMO } from "../store/studio";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
-import { downloadBlob, slugify } from "../lib/util";
+import { slugify } from "../lib/util";
+import { saveFile } from "../lib/runtime";
 import { Icon } from "./Icon";
 import { useEasy } from "../store/easy";
 
@@ -12,6 +13,7 @@ export function TopBar() {
   const { renameProject, commit, toast, setSettingsOpen, setTab } = useStudio.getState();
   const mode = useEasy((s) => s.mode);
   const setMode = useEasy((s) => s.setMode);
+  const canDownload = useStudio((s) => s.canDownload);
   const [name, setName] = useState(project?.name ?? "");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
 
@@ -56,8 +58,8 @@ export function TopBar() {
     setBusy("zip");
     try {
       await useStudio.getState().flush();
-      downloadBlob(await exportSourceZip(useStudio.getState().project!), `${slugify(project.name)}.zip`);
-      toast("ZIP exportado", "success");
+      const saved = await saveFile(await exportSourceZip(useStudio.getState().project!), `${slugify(project.name)}.zip`);
+      if (saved) toast("ZIP exportado", "success");
     } catch (err) {
       toast(`Error al exportar: ${(err as Error).message}`, "error");
     } finally {
@@ -115,8 +117,8 @@ export function TopBar() {
       <button
         className="btn"
         onClick={exportZip}
-        disabled={busy === "zip" || IS_DEMO}
-        title={IS_DEMO ? "Las descargas están bloqueadas en la demo web" : "Descargar el código fuente como ZIP"}
+        disabled={busy === "zip" || !canDownload}
+        title={canDownload ? "Descargar el código fuente como ZIP" : "Esta vista no permite descargar ficheros"}
       >
         {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} <span className="label">Exportar ZIP</span>
       </button>

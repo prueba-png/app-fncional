@@ -4,6 +4,7 @@ import { sanitizePath } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { Project, Settings, Version, VersionSource } from "../db/db";
 import { health, type HealthInfo } from "../lib/api";
+import { canSaveFiles, getSample } from "../lib/runtime";
 import { TEMPLATES } from "../lib/templates";
 import { uid } from "../lib/util";
 import type { ProjectBundle } from "../lib/zip";
@@ -23,6 +24,14 @@ interface PendingAsk extends AskOptions {
   resolve: (value: string | null) => void;
 }
 
+/**
+ * De dónde sale la IA:
+ * - "server": el servidor local (necesita clave de API de Anthropic);
+ * - "claude": la cuenta de claude.ai del usuario, cuando la app se abre como página publicada;
+ * - "none": ninguna disponible.
+ */
+export type AiSource = "server" | "claude" | "none";
+
 export interface Toast {
   id: string;
   kind: "info" | "success" | "error";
@@ -41,6 +50,8 @@ interface StudioState {
   settingsOpen: boolean;
   newProjectOpen: boolean;
   pendingAsk: PendingAsk | null;
+  ai: AiSource;
+  canDownload: boolean;
 
   init(): Promise<void>;
   /** Confirmación dentro de la página (sustituye a confirm/prompt). Devuelve null si se cancela. */
@@ -84,6 +95,16 @@ interface StudioState {
   importBundles(bundles: ProjectBundle[], origin: Project["origin"]["type"]): Promise<number>;
 }
 
+/** ¿Se puede usar la IA ahora mismo? */
+export function aiAvailable(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
+  return s.ai === "claude" || (s.ai === "server" && Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey));
+}
+
+/** Hay servidor local pero falta la clave de API. */
+export function needsApiKey(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
+  return s.ai === "server" && !s.settings.anthropicApiKey && !s.health?.hasEnvApiKey;
+}
+
 /** Compilación de demostración sin servidor local (VITE_DEMO=1). */
 export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
 
@@ -122,6 +143,8 @@ export const useStudio = create<StudioState>((set, get) => {
     settingsOpen: false,
     newProjectOpen: false,
     pendingAsk: null,
+    ai: "none",
+    canDownload: true,
 
     ask(opts) {
       get().pendingAsk?.resolve(null);
@@ -135,7 +158,12 @@ export const useStudio = create<StudioState>((set, get) => {
 
     async init() {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
-      set({ settings, projects, health: h });
+      set({ settings, projects, health: h, ai: h ? "server" : "none" });
+      if (!h) {
+        // Sin servidor local: se prueba la IA y las descargas del visor de claude.ai (no bloquea el arranque)
+        void getSample().then((s) => s && set({ ai: "claude" }));
+        void canSaveFiles().then((ok) => set({ canDownload: ok }));
+      }
       let last: string | null = null;
       try {
         last = localStorage.getItem(LAST_PROJECT_KEY);

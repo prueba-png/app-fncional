@@ -4,6 +4,7 @@ import { parseFileBlocks } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { ChatMessage } from "../db/db";
 import { streamChat } from "../lib/api";
+import { getSample, sampleChat } from "../lib/runtime";
 import { uid } from "../lib/util";
 import { useStudio } from "./studio";
 
@@ -61,7 +62,12 @@ export const useChat = create<ChatState>((set, get) => ({
     if (get().projectId !== project.id) await get().load(project.id);
 
     const { settings } = studio;
-    if (!settings.anthropicApiKey && !studio.health?.hasEnvApiKey) {
+    const useWeb = studio.ai === "claude";
+    if (studio.ai === "none") {
+      studio.toast("La IA no está disponible aquí. Abre la app con «npm run dev» en tu ordenador.", "error");
+      return;
+    }
+    if (!useWeb && !settings.anthropicApiKey && !studio.health?.hasEnvApiKey) {
       studio.toast("Configura tu clave de API de Anthropic en Ajustes.", "error");
       studio.setSettingsOpen(true);
       return;
@@ -91,7 +97,30 @@ export const useChat = create<ChatState>((set, get) => ({
 
     try {
       await useStudio.getState().flush();
-      await streamChat(
+      const sample = useWeb ? await getSample() : null;
+      if (useWeb) {
+        if (!sample) throw new Error("La IA de claude.ai no está disponible en esta vista.");
+        set({ status: "Pensando…" });
+        const result = await sampleChat(
+          sample,
+          {
+            history,
+            prompt: userMsg.content,
+            files: useStudio.getState().project!.files,
+            activeFile: project.activeFile,
+            attachments: opts.attachments,
+            mode: opts.mode ?? "edit",
+          },
+          (t) => {
+            text = t;
+            set({ streamText: t });
+          },
+          controller.signal,
+        );
+        text = result.text;
+        model = "Claude (tu cuenta de claude.ai)";
+        stopReason = result.truncated ? "max_tokens" : "end_turn";
+      } else await streamChat(
         {
           apiKey: settings.anthropicApiKey || undefined,
           model: settings.model,
@@ -118,6 +147,8 @@ export const useChat = create<ChatState>((set, get) => ({
         controller.signal,
       );
     } catch (err) {
+      const partial = (err as { partial?: string }).partial;
+      if (partial && partial.length > text.length) text = partial;
       if ((err as Error).name === "AbortError") error = "Generación detenida por el usuario.";
       else error = (err as Error).message;
     }

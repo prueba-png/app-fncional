@@ -288,8 +288,8 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
 .recent-text { display: grid; min-width: 0; }
 .recent-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 
-.easy-working { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
-.working-card { width: min(560px, 100%); gap: 16px; }
+.easy-working { min-height: 100%; display: grid; grid-template-columns: minmax(0, 560px); justify-content: center; align-content: center; padding: 24px 16px; }
+.working-card { width: 100%; gap: 16px; }
 .working-card h1 { font-size: 20px; margin: 0; overflow-wrap: anywhere; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .step { display: flex; align-items: center; gap: 10px; color: var(--muted); }

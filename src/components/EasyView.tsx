@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { parseFileBlocks } from "../../shared/fileBlocks";
 import { useEasy, normalizeUrl } from "../store/easy";
-import { useStudio, IS_DEMO } from "../store/studio";
+import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
 import { useChat } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
-import { downloadBlob, slugify, timeAgo } from "../lib/util";
+import { slugify, timeAgo } from "../lib/util";
+import { saveFile } from "../lib/runtime";
 import { PreviewPane } from "./PreviewPane";
 import { Icon } from "./Icon";
 
@@ -81,7 +82,8 @@ function StartScreen() {
   const { cloneUrl, cloneFiles, openResult } = useEasy.getState();
   const projects = useStudio((s) => s.projects);
   const health = useStudio((s) => s.health);
-  const hasKey = useStudio((s) => Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey));
+  const ai = useStudio((s) => s.ai);
+  const showKeyCard = useStudio((s) => needsApiKey(s));
   const [url, setUrl] = useState("");
   const [over, setOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -110,11 +112,15 @@ function StartScreen() {
         <p className="muted">Pega el enlace de una web o sube una captura, un vídeo o un archivo. La vista previa aparece sola.</p>
       </header>
 
-      {!health && (
+      {!health && ai === "claude" && (
+        <div className="notice easy-notice">
+          Estás en la versión web: las capturas y los vídeos se clonan con tu cuenta de claude.ai (la primera vez te pedirá permiso). Para
+          clonar por enlace, haz una captura de la web y súbela, o usa la app en tu ordenador.
+        </div>
+      )}
+      {!health && ai === "none" && (
         <div className="notice warning easy-notice">
-          {IS_DEMO
-            ? "Esta es la demo web: el clonado necesita el servidor local. Descarga el proyecto y ábrelo con «npm run dev» para usarlo."
-            : "No encuentro el servidor local. Ábrelo con «npm run dev» y recarga esta página."}
+          No encuentro el servidor local. Ábrelo con «npm run dev» en tu ordenador y recarga esta página.
         </div>
       )}
 
@@ -179,7 +185,7 @@ function StartScreen() {
         </section>
       </div>
 
-      {!hasKey && health && <AiKeyCard compact />}
+      {showKeyCard && <AiKeyCard compact />}
 
       {projects.length > 0 && (
         <section className="easy-recent" aria-labelledby="recent-title">
@@ -248,7 +254,7 @@ function WorkingScreen() {
               <button className="btn" onClick={goHome}>
                 Volver
               </button>
-              {!job.needsKey && (
+              {!job.needsKey && job.canRetry !== false && (
                 <button className="btn primary" onClick={() => void retry()}>
                   <Icon name="refresh" /> Reintentar
                 </button>
@@ -273,7 +279,9 @@ function ResultScreen() {
   const { goHome, setMode } = useEasy.getState();
   const { toast, restoreVersion, setSettingsOpen } = useStudio.getState();
   const { streaming, messages } = useChat();
-  const hasKey = useStudio((s) => Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey));
+  const canUseAi = useStudio((s) => aiAvailable(s));
+  const missingKey = useStudio((s) => needsApiKey(s));
+  const canDownload = useStudio((s) => s.canDownload);
   const [change, setChange] = useState("");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
   const [showKey, setShowKey] = useState(false);
@@ -289,8 +297,12 @@ function ResultScreen() {
   const applyChange = () => {
     const text = change.trim();
     if (!text || streaming) return;
-    if (!hasKey) {
+    if (missingKey) {
       setShowKey(true);
+      return;
+    }
+    if (!canUseAi) {
+      toast("La IA no está disponible aquí. Usa la app en tu ordenador (npm run dev).", "error");
       return;
     }
     setChange("");
@@ -301,8 +313,8 @@ function ResultScreen() {
     setBusy("zip");
     try {
       await useStudio.getState().flush();
-      downloadBlob(await exportSourceZip(useStudio.getState().project!), `${slugify(project.name)}.zip`);
-      toast("Descarga lista", "success");
+      const saved = await saveFile(await exportSourceZip(useStudio.getState().project!), `${slugify(project.name)}.zip`);
+      if (saved) toast("Descarga lista", "success");
     } catch (err) {
       toast((err as Error).message, "error");
     } finally {
@@ -338,7 +350,7 @@ function ResultScreen() {
           {project.origin.detail && <span className="muted small">{project.origin.detail}</span>}
         </div>
         <div className="result-actions">
-          <button className="btn" aria-label="Descargar" onClick={() => void download()} disabled={busy === "zip" || IS_DEMO} title={IS_DEMO ? "Las descargas están bloqueadas en la demo web" : "Descargar el código"}>
+          <button className="btn" aria-label="Descargar" onClick={() => void download()} disabled={busy === "zip" || !canDownload} title={canDownload ? "Descargar el código" : "Esta vista no permite descargar ficheros"}>
             {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} <span className="label">Descargar</span>
           </button>
           <button className="btn" aria-label="Guardar en Telegram" onClick={() => void saveTelegram()} disabled={busy === "tg"} title="Guardar una copia en tu Telegram">
@@ -354,7 +366,7 @@ function ResultScreen() {
         <PreviewPane simple />
       </div>
       <div className="change-box">
-        {showKey && !hasKey && <AiKeyCard compact onSaved={() => setShowKey(false)} />}
+        {showKey && missingKey && <AiKeyCard compact onSaved={() => setShowKey(false)} />}
         {streaming && (
           <div className="row muted small">
             <span className="spinner" /> Aplicando tu cambio…
