@@ -4,17 +4,53 @@ import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { downloadBlob, slugify } from "../lib/util";
 import { Icon } from "./Icon";
+import { useEasy } from "../store/easy";
 
 export function TopBar() {
   const project = useStudio((s) => s.project);
   const health = useStudio((s) => s.health);
   const { renameProject, commit, toast, setSettingsOpen, setTab } = useStudio.getState();
+  const mode = useEasy((s) => s.mode);
+  const setMode = useEasy((s) => s.setMode);
   const [name, setName] = useState(project?.name ?? "");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
 
   useEffect(() => setName(project?.name ?? ""), [project?.id, project?.name]);
 
-  if (!project) return <header className="topbar" />;
+  const logo = (
+    <button className="logo" onClick={() => mode === "easy" && useEasy.getState().goHome()} aria-label="DevStudio Pro, ir al inicio">
+      <span className="logo-mark">
+        <Icon name="bolt" size={15} />
+      </span>
+      DevStudio <small>Pro</small>
+    </button>
+  );
+  const modeToggle = (
+    <div className="seg mode-toggle" role="group" aria-label="Modo de la aplicación">
+      <button className={mode === "easy" ? "active" : ""} aria-pressed={mode === "easy"} onClick={() => setMode("easy")}>
+        Fácil
+      </button>
+      <button className={mode === "advanced" ? "active" : ""} aria-pressed={mode === "advanced"} onClick={() => setMode("advanced")}>
+        Avanzado
+      </button>
+    </div>
+  );
+  const settingsButton = (
+    <button className="btn icon" onClick={() => setSettingsOpen(true)} title="Ajustes" aria-label="Ajustes">
+      <Icon name="settings" />
+    </button>
+  );
+
+  if (mode === "easy" || !project) {
+    return (
+      <header className="topbar">
+        {logo}
+        <div className="spacer" />
+        {modeToggle}
+        {settingsButton}
+      </header>
+    );
+  }
 
   const exportZip = async () => {
     setBusy("zip");
@@ -54,12 +90,7 @@ export function TopBar() {
 
   return (
     <header className="topbar">
-      <div className="logo">
-        <div className="logo-mark">
-          <Icon name="bolt" size={15} />
-        </div>
-        DevStudio <small>Pro</small>
-      </div>
+      {logo}
       <input
         className="project-name"
         value={name}
@@ -92,9 +123,8 @@ export function TopBar() {
       <button className="btn" onClick={backup} disabled={busy === "tg"} title="Respaldar este proyecto en tu chat de Telegram">
         {busy === "tg" ? <span className="spinner" /> : <Icon name="cloud" />} <span className="label">Sincronizar</span>
       </button>
-      <button className="btn icon" onClick={() => setSettingsOpen(true)} title="Ajustes" aria-label="Ajustes">
-        <Icon name="settings" />
-      </button>
+      {modeToggle}
+      {settingsButton}
     </header>
   );
 }

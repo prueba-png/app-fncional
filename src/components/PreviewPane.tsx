@@ -19,7 +19,8 @@ interface ConsoleEntry {
  */
 const SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock";
 
-export function PreviewPane() {
+/** `simple`: oculta los controles técnicos (consola, recarga automática) en el modo fácil. */
+export function PreviewPane({ simple = false }: { simple?: boolean }) {
   const files = useStudio((s) => s.project?.files);
   const projectId = useStudio((s) => s.project?.id);
   const autoInject = useStudio((s) => s.project?.autoInjectDeps ?? true);
@@ -67,14 +68,14 @@ export function PreviewPane() {
       if (data.type === "console") {
         const text = (data.args ?? []).join(" ");
         setLogs((l) => [...l.slice(-299), { id: ++seq.current, level: data.level ?? "log", text }]);
-        if (data.level === "error") setShowConsole(true);
+        if (data.level === "error" && !simple) setShowConsole(true);
       } else if (data.type === "navigate" && typeof data.path === "string" && pages.includes(data.path)) {
         setPage(data.path);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [pages]);
+  }, [pages, simple]);
 
   const errors = logs.filter((l) => l.level === "error").length;
 
@@ -91,7 +92,7 @@ export function PreviewPane() {
             ))}
           </select>
         ) : (
-          <span className="muted small">Vista previa aislada</span>
+          <span className="muted small">{simple ? "Vista previa" : "Vista previa aislada"}</span>
         )}
         <div className="grow" />
         <div className="seg" role="group" aria-label="Tamaño de pantalla">
@@ -101,9 +102,11 @@ export function PreviewPane() {
             </button>
           ))}
         </div>
-        <label className="check small muted" title="Recargar automáticamente al editar">
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} /> auto
-        </label>
+        {!simple && (
+          <label className="check small muted" title="Recargar automáticamente al editar">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} /> auto
+          </label>
+        )}
         <button
           className="btn sm icon ghost"
           title="Recargar"
@@ -115,10 +118,12 @@ export function PreviewPane() {
         >
           <Icon name="refresh" size={14} />
         </button>
-        <button className={`btn sm ghost${showConsole ? " active" : ""}`} onClick={() => setShowConsole((s) => !s)} title="Consola">
-          <Icon name="terminal" size={14} />
-          {errors > 0 ? <span className="badge danger">{errors}</span> : logs.length > 0 ? <span className="badge">{logs.length}</span> : null}
-        </button>
+        {!simple && (
+          <button className={`btn sm ghost${showConsole ? " active" : ""}`} onClick={() => setShowConsole((s) => !s)} title="Consola">
+            <Icon name="terminal" size={14} />
+            {errors > 0 ? <span className="badge danger">{errors}</span> : logs.length > 0 ? <span className="badge">{logs.length}</span> : null}
+          </button>
+        )}
       </div>
       <div className="preview-stage">
         <iframe
@@ -132,7 +137,7 @@ export function PreviewPane() {
           style={{ width: WIDTHS[viewport] }}
         />
       </div>
-      {showConsole && (
+      {showConsole && !simple && (
         <div className="console" aria-label="Consola">
           <div className="console-head">
             <span>Consola ({logs.length})</span>

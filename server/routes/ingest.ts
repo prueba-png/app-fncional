@@ -11,10 +11,18 @@ ingestRouter.post("/", async (req, res) => {
     res.status(400).json({ error: "Indica una URL." });
     return;
   }
-  let url = body.url.trim();
-  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  const raw = body.url.trim();
+  const hasProtocol = /^https?:\/\//i.test(raw);
+  const opts = { keepScripts: !!body.keepScripts, inlineStylesheets: body.inlineStylesheets !== false };
   try {
-    const result = await ingestUrl({ url, keepScripts: !!body.keepScripts, inlineStylesheets: body.inlineStylesheets !== false });
+    let result;
+    try {
+      result = await ingestUrl({ url: hasProtocol ? raw : `https://${raw}`, ...opts });
+    } catch (err) {
+      // Sin protocolo indicado: si HTTPS falla por red, se prueba HTTP
+      if (hasProtocol || !(err instanceof FetchError) || err.status !== 502 || /resolver el dominio/.test(err.message)) throw err;
+      result = await ingestUrl({ url: `http://${raw}`, ...opts });
+    }
     res.json(result);
   } catch (err) {
     const status = err instanceof FetchError ? err.status : 500;

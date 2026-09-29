@@ -74,6 +74,8 @@ export interface IngestResult {
   a11y: A11yIssue[];
   dependencies: DetectedDependency[];
   warnings: string[];
+  /** La página original apenas tiene contenido sin JavaScript (SPA): la réplica sin scripts saldría vacía */
+  looksClientRendered: boolean;
 }
 
 export interface IngestOptions {

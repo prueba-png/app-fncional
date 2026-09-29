@@ -2,6 +2,17 @@
 
 Entorno de desarrollo **local y privado** para ingeniería inversa de interfaces, prototipado rápido y gestión descentralizada de proyectos.
 
+## Modo fácil (pantalla principal)
+
+Pensado para usarlo sin saber programar:
+
+1. **Pega el enlace de una web** → se clona sola y ves la vista previa. Si la web se construye con JavaScript (React, Next…), la app lo detecta y la clona conservando sus scripts.
+2. **Sube una captura, un vídeo, un PDF o un SVG** → la IA reconstruye la página y ves la vista previa. Los ficheros HTML y ZIP se abren directamente, sin IA.
+3. **Pide cambios con tus palabras** («pon el botón en verde») y pulsa **Aplicar**. Cada cambio se puede **deshacer**.
+4. **Descarga** el código, **guárdalo en Telegram** o pulsa **Ver código** para pasar al modo avanzado.
+
+El selector **Fácil / Avanzado** de la barra superior cambia de modo cuando quieras. El modo avanzado tiene el editor, el historial, el análisis, las librerías y todo lo demás.
+
 - **Análisis estructural de UI**: ingesta de URLs públicas (DOM, CSS, assets, accesibilidad) y generación de una réplica estática de estudio.
 - **Referencia visual**: capturas, vídeos (extracción de fotogramas), SVG y PDF procesados en el navegador para generar interfaces equivalentes.
 - **Asistente de código**: chat con Claude que edita los ficheros del proyecto en tiempo real mediante streaming.

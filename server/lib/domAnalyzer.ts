@@ -237,6 +237,7 @@ export async function ingestUrl(opts: IngestOptions): Promise<IngestResult> {
   const title = $("title").first().text().trim();
   const description = $('meta[name="description"]').attr("content")?.trim() ?? $('meta[property="og:description"]').attr("content")?.trim() ?? "";
   const lang = $("html").attr("lang") ?? "";
+  const looksClientRendered = detectClientRendered($);
 
   // --- inventario de assets y URLs absolutas ---
   const assets = new Map<string, AssetRef>();
@@ -363,5 +364,21 @@ export async function ingestUrl(opts: IngestOptions): Promise<IngestResult> {
     a11y,
     dependencies,
     warnings,
+    looksClientRendered,
   };
+}
+
+/** Heurística: la página depende de JavaScript para mostrar su contenido (React, Vue, Next…). */
+export function detectClientRendered($: cheerio.CheerioAPI): boolean {
+  const body = $("body").clone();
+  body.find("script, style, noscript, template, link, meta").remove();
+  const text = body.text().replace(/\s+/g, " ").trim();
+  const visible = body.find("img, svg, video, picture, canvas, input, button").length;
+  const hasScripts = $("script[src], script[type=module]").length > 0;
+  const emptyMount = ["#root", "#app", "#__next", "#__nuxt", "#svelte", "[data-reactroot]"].some((sel) => {
+    const el = $(sel);
+    return el.length > 0 && el.text().trim().length < 20 && el.children().length <= 1;
+  });
+  // Páginas pequeñas con un script de analítica no cuentan: hace falta un contenedor vacío o un cuerpo prácticamente sin contenido
+  return hasScripts && (emptyMount || (text.length < 40 && visible < 2));
 }

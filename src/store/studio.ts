@@ -155,7 +155,7 @@ export const useStudio = create<StudioState>((set, get) => {
 
     toast(message, kind = "info") {
       const id = uid("t_");
-      set({ toasts: [...get().toasts, { id, kind, message }] });
+      set({ toasts: [...get().toasts.filter((t) => t.message !== message).slice(-2), { id, kind, message }] });
       setTimeout(() => get().dismissToast(id), kind === "error" ? 8000 : 4000);
     },
     dismissToast(id) {

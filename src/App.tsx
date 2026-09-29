@@ -11,10 +11,13 @@ import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Toasts } from "./components/Toasts";
 import { AskDialog } from "./components/AskDialog";
 import { useAutoBackup } from "./hooks/useAutoBackup";
+import { useEasy } from "./store/easy";
+import { EasyView } from "./components/EasyView";
 
 export function App() {
   const ready = useStudio((s) => s.ready);
   const projectId = useStudio((s) => s.project?.id);
+  const mode = useEasy((s) => s.mode);
   const [split, setSplit] = useState(50);
   const [dragging, setDragging] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -76,7 +79,10 @@ export function App() {
   return (
     <div className="app">
       <TopBar />
-      <div className="main">
+      {mode === "easy" ? (
+        <EasyView />
+      ) : (
+        <div className="main">
         <Sidebar />
         <div className="workspace" ref={workspaceRef}>
           <div className="pane" style={{ width: `${split}%` }}>
@@ -101,8 +107,9 @@ export function App() {
             <PreviewPane />
           </div>
         </div>
-        <ToolPanel />
-      </div>
+          <ToolPanel />
+        </div>
+      )}
       <SettingsDialog />
       <NewProjectDialog />
       <AskDialog />
