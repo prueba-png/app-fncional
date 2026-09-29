@@ -4,7 +4,7 @@ import { sanitizePath } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { Project, Settings, Version, VersionSource } from "../db/db";
 import { health, type HealthInfo } from "../lib/api";
-import { canSaveFiles, getSample } from "../lib/runtime";
+import { canSaveFiles, getSample, sampleSupportsImages } from "../lib/runtime";
 import { TEMPLATES } from "../lib/templates";
 import { uid } from "../lib/util";
 import type { ProjectBundle } from "../lib/zip";
@@ -51,6 +51,8 @@ interface StudioState {
   newProjectOpen: boolean;
   pendingAsk: PendingAsk | null;
   ai: AiSource;
+  /** Solo con ai = "claude": si esta vista puede enviar imágenes (null = aún no se sabe) */
+  webImages: boolean | null;
   canDownload: boolean;
 
   init(): Promise<void>;
@@ -144,6 +146,7 @@ export const useStudio = create<StudioState>((set, get) => {
     newProjectOpen: false,
     pendingAsk: null,
     ai: "none",
+    webImages: null,
     canDownload: true,
 
     ask(opts) {
@@ -161,7 +164,11 @@ export const useStudio = create<StudioState>((set, get) => {
       set({ settings, projects, health: h, ai: h ? "server" : "none" });
       if (!h) {
         // Sin servidor local: se prueba la IA y las descargas del visor de claude.ai (no bloquea el arranque)
-        void getSample().then((s) => s && set({ ai: "claude" }));
+        void getSample().then(async (s) => {
+          if (!s) return;
+          set({ ai: "claude" });
+          set({ webImages: await sampleSupportsImages(s) });
+        });
         void canSaveFiles().then((ok) => set({ canDownload: ok }));
       }
       let last: string | null = null;

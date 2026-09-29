@@ -7,6 +7,7 @@ import type { ChatAttachment, FileMap } from "../../shared/types";
 import * as db from "../db/db";
 import { ingest } from "../lib/api";
 import { processReferenceFile } from "../lib/media";
+import { getSample, sampleSupportsImages } from "../lib/runtime";
 import { countImages, MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
 import { readZip } from "../lib/zip";
 import { useChat } from "./chat";
@@ -31,6 +32,8 @@ export interface Job {
   needsKey?: boolean;
   /** false cuando reintentar daría el mismo error (p. ej. formato no soportado) */
   canRetry?: boolean;
+  /** La vista no puede enviar imágenes: se pide una descripción escrita (plan B) */
+  needsDescription?: boolean;
   /** Aviso informativo sobre el resultado */
   note?: string;
   usesAi: boolean;
@@ -47,6 +50,8 @@ interface EasyState {
   openResult(projectId: string): Promise<void>;
   cloneUrl(url: string): Promise<void>;
   cloneFiles(files: File[]): Promise<void>;
+  /** Plan B cuando la vista no puede enviar imágenes: clona a partir de una descripción escrita */
+  cloneFromDescription(description: string): Promise<void>;
   retry(): Promise<void>;
   cancel(): void;
 }
@@ -59,6 +64,8 @@ const MAX_DOC_CHARS = 60_000;
 
 let abortController: AbortController | null = null;
 let lastInput: { kind: "url"; url: string } | { kind: "files"; files: File[] } | null = null;
+/** Referencias ya procesadas a la espera de la descripción del usuario (plan B) */
+let pendingDescribe: { projectId: string; refs: db.VisualReference[]; extra: ChatAttachment[]; labels: string[] } | null = null;
 
 function readMode(): Mode {
   try {
@@ -90,6 +97,33 @@ const CLONE_PROMPT = `Clona con la máxima fidelidad posible la interfaz que apa
 - Debe verse bien en móvil, tablet y escritorio (diseño responsive).
 - Usa textos iguales o equivalentes a los de la referencia.`;
 
+const DESCRIBE_PROMPT = `No puedes ver la imagen original: esta vista no permite enviar imágenes.
+Crea la interfaz a partir de la DESCRIPCIÓN del usuario y de los datos extraídos de la captura (paleta de colores dominante y tamaño).
+- Usa esa paleta como colores principales de la página.
+- Si la captura es vertical y estrecha, es una pantalla de móvil: diseña primero para móvil.
+- Crea una página completa y funcional: index.html, styles.css y script.js, responsive.
+- Si la descripción es breve, completa con contenido de ejemplo coherente.`;
+
+/** ¿Puede esta vista enviar imágenes? Usa el valor ya detectado o lo comprueba ahora. */
+async function webImagesOk(): Promise<boolean> {
+  const known = useStudio.getState().webImages;
+  if (known !== null) return known;
+  const sample = await getSample();
+  const ok = sample ? await sampleSupportsImages(sample) : false;
+  useStudio.setState({ webImages: ok });
+  return ok;
+}
+
+/** Datos de las referencias en texto (sin imágenes) para el plan B */
+function describeRefs(refs: db.VisualReference[]): string {
+  return refs
+    .map((r) => {
+      const size = r.width && r.height ? `${r.width}×${r.height} px (${r.height > r.width * 1.3 ? "vertical, probablemente móvil" : r.width > r.height * 1.3 ? "horizontal, probablemente escritorio" : "cuadrada"})` : "tamaño desconocido";
+      return `- ${r.name}: ${r.kind === "video" ? `vídeo de ${Math.round(r.duration ?? 0)} s` : "imagen"}, ${size}; paleta dominante: ${r.palette.join(", ") || "no disponible"}`;
+    })
+    .join("\n");
+}
+
 export const useEasy = create<EasyState>((set, get) => {
   const setSteps = (update: (steps: Step[]) => Step[]) => {
     const job = get().job;
@@ -114,6 +148,34 @@ export const useEasy = create<EasyState>((set, get) => {
     }
     setSteps((steps) => steps.map((s) => ({ ...s, state: "done" })));
     set({ stage: "result", notes });
+  };
+
+  /** Envía la petición a la IA y termina el trabajo con la vista previa o un error comprensible */
+  const runAi = async (prompt: string, attachments: ChatAttachment[], labels: string[]) => {
+    advance(1);
+    const unsubscribe = useChat.subscribe((s) => {
+      if (s.streamText.includes("<file")) advance(2);
+    });
+    try {
+      await useChat.getState().send(prompt, { attachments, attachmentLabels: labels, mode: "generate-from-reference" });
+    } finally {
+      unsubscribe();
+    }
+    if (get().stage !== "working") return; // cancelado
+
+    const last = useChat.getState().messages.at(-1);
+    const current = useStudio.getState().project;
+    const built = current && Object.values(current.files).some((c) => c.trim().length > 0);
+    if (last?.role === "assistant" && last.meta?.error && !built) {
+      fail(friendlyAiError(last.meta.error));
+      return;
+    }
+    if (!built) {
+      fail("La IA no devolvió ninguna página. Prueba con una captura más clara o añade más detalles.");
+      return;
+    }
+    advance(3);
+    finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : undefined);
   };
 
   return {
@@ -229,6 +291,7 @@ export const useEasy = create<EasyState>((set, get) => {
     async cloneFiles(files) {
       if (!files.length) return;
       lastInput = { kind: "files", files };
+      pendingDescribe = null;
       const studio = useStudio.getState();
       const zips = files.filter((f) => /\.zip$/i.test(f.name) || f.type === "application/zip");
       const htmls = files.filter((f) => /\.html?$/i.test(f.name));
@@ -337,30 +400,39 @@ export const useEasy = create<EasyState>((set, get) => {
           return;
         }
 
-        advance(1);
-        const unsubscribe = useChat.subscribe((s) => {
-          if (s.streamText.includes("<file")) advance(2);
-        });
-        try {
-          await useChat.getState().send(CLONE_PROMPT, { attachments: all, attachmentLabels: labels, mode: "generate-from-reference" });
-        } finally {
-          unsubscribe();
+        // Plan B: esta vista no puede enviar imágenes → se pide una descripción escrita
+        if (studio.ai === "claude" && countImages(attachments) > 0 && !(await webImagesOk())) {
+          pendingDescribe = { projectId: project.id, refs, extra, labels };
+          advance(1);
+          fail(
+            "Desde aquí no se pueden enviar imágenes a la IA (depende de la app o navegador donde abres la página). Describe con tus palabras lo que se ve en la captura y la IA lo creará con los colores que he sacado de ella.",
+            { needsDescription: true, canRetry: false },
+          );
+          return;
         }
-        if (get().stage !== "working") return; // cancelado
 
-        const last = useChat.getState().messages.at(-1);
-        const current = useStudio.getState().project;
-        const built = current && Object.values(current.files).some((c) => c.trim().length > 0);
-        if (last?.role === "assistant" && last.meta?.error && !built) {
-          fail(friendlyAiError(last.meta.error));
-          return;
-        }
-        if (!built) {
-          fail("La IA no devolvió ninguna página. Prueba con una captura más clara o añade más detalles.");
-          return;
-        }
-        advance(3);
-        finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : undefined);
+        await runAi(CLONE_PROMPT, all, labels);
+      } catch (err) {
+        fail(friendlyAiError((err as Error).message));
+      }
+    },
+
+    async cloneFromDescription(description) {
+      const pending = pendingDescribe;
+      const text = description.trim();
+      if (!pending || !text) return;
+      const job = get().job;
+      if (!job) return;
+      set({ job: { ...job, error: undefined, needsDescription: false, canRetry: undefined } });
+      try {
+        if (useStudio.getState().project?.id !== pending.projectId) await useStudio.getState().openProject(pending.projectId);
+        const attachments: ChatAttachment[] = [
+          { type: "text", label: "Datos extraídos de la captura", text: describeRefs(pending.refs) },
+          { type: "text", label: "Descripción del usuario", text },
+          ...pending.extra,
+        ];
+        await runAi(DESCRIBE_PROMPT, attachments, pending.labels);
+        if (get().stage === "result") pendingDescribe = null;
       } catch (err) {
         fail(friendlyAiError((err as Error).message));
       }

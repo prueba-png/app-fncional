@@ -304,6 +304,8 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
 .ai-live { display: grid; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
 .ai-live p { margin: 0; white-space: pre-wrap; }
 .working-actions { justify-content: flex-end; }
+.describe-box { display: grid; gap: 10px; }
+.describe-box .btn.big { justify-content: center; }
 
 .easy-result { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .result-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-2); flex: none; min-width: 0; }

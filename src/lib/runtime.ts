@@ -56,6 +56,15 @@ export async function getSample(): Promise<SampleFn | null> {
   }
 }
 
+/** ¿Puede esta vista enviar imágenes a Claude? (depende de la app o navegador donde se abre la página) */
+export async function sampleSupportsImages(sample: SampleFn): Promise<boolean> {
+  try {
+    return Boolean((await sample.limits()).images);
+  } catch {
+    return false;
+  }
+}
+
 async function getDownloads(): Promise<Downloads | null> {
   const rt = runtime();
   if (!rt) return null;

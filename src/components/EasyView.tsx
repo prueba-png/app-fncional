@@ -83,6 +83,7 @@ function StartScreen() {
   const projects = useStudio((s) => s.projects);
   const health = useStudio((s) => s.health);
   const ai = useStudio((s) => s.ai);
+  const webImages = useStudio((s) => s.webImages);
   const showKeyCard = useStudio((s) => needsApiKey(s));
   const [url, setUrl] = useState("");
   const [over, setOver] = useState(false);
@@ -112,7 +113,13 @@ function StartScreen() {
         <p className="muted">Pega el enlace de una web o sube una captura, un vídeo o un archivo. La vista previa aparece sola.</p>
       </header>
 
-      {!health && ai === "claude" && (
+      {!health && ai === "claude" && webImages === false && (
+        <div className="notice warning easy-notice">
+          Desde aquí la IA no puede ver imágenes (depende de la app o navegador donde abres la página). Puedes subir la captura igualmente
+          y describir lo que se ve, o abrir este enlace en el navegador (Safari o Chrome) para clonarla directamente.
+        </div>
+      )}
+      {!health && ai === "claude" && webImages !== false && (
         <div className="notice easy-notice">
           Estás en la versión web: las capturas y los vídeos se clonan con tu cuenta de claude.ai (la primera vez te pedirá permiso). Para
           clonar por enlace, haz una captura de la web y súbela, o usa la app en tu ordenador.
@@ -211,7 +218,8 @@ function StartScreen() {
 /* ── Pantalla de progreso ──────────────────────────────────────── */
 function WorkingScreen() {
   const job = useEasy((s) => s.job);
-  const { cancel, retry, goHome } = useEasy.getState();
+  const { cancel, retry, goHome, cloneFromDescription } = useEasy.getState();
+  const [description, setDescription] = useState("");
   const streamText = useChat((s) => s.streamText);
   if (!job) return null;
   const filesInProgress = job.usesAi ? [...new Set([...streamText.matchAll(/<file\s+path="([^"]+)"/g)].map((m) => m[1]))] : [];
@@ -220,7 +228,7 @@ function WorkingScreen() {
   return (
     <div className="easy-working">
       <div className="easy-card working-card">
-        <h1>{job.error ? "No se pudo completar" : job.title}</h1>
+        <h1>{job.needsDescription ? "Falta un paso" : job.error ? "No se pudo completar" : job.title}</h1>
         <ol className="steps">
           {job.steps.map((s, i) => (
             <li key={i} className={`step ${s.state}`}>
@@ -246,8 +254,30 @@ function WorkingScreen() {
             <small className="muted">Suele tardar entre 30 segundos y 2 minutos.</small>
           </div>
         )}
-        {job.error && <div className="notice danger">{job.error}</div>}
+        {job.error && <div className={`notice ${job.needsDescription ? "warning" : "danger"}`}>{job.error}</div>}
         {job.needsKey && <AiKeyCard onSaved={() => void retry()} />}
+        {job.needsDescription && (
+          <div className="describe-box">
+            <label className="field" htmlFor="easy-describe" style={{ marginBottom: 0 }}>
+              <span>¿Qué se ve en la captura?</span>
+            </label>
+            <textarea
+              id="easy-describe"
+              className="textarea"
+              rows={4}
+              placeholder="Ej.: una tienda online con menú arriba, un banner grande con una zapatilla, tres productos en tarjetas y un pie de página oscuro."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <button className="btn primary big" disabled={description.trim().length < 10} onClick={() => void cloneFromDescription(description)}>
+              <Icon name="sparkles" /> Crear con mi descripción
+            </button>
+            <small className="muted">
+              Consejo: abre este mismo enlace en el navegador (Safari o Chrome) o en claude.ai desde el ordenador; allí puede que la IA sí vea
+              la captura directamente.
+            </small>
+          </div>
+        )}
         <div className="row wrap working-actions">
           {job.error ? (
             <>
