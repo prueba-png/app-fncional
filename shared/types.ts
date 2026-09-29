@@ -84,6 +84,8 @@ export interface IngestOptions {
   keepScripts?: boolean;
   /** Descargar e incrustar las hojas de estilo externas en styles.css (por defecto: true) */
   inlineStylesheets?: boolean;
+  /** Tiempo máximo total en ms (entornos serverless con límite de ejecución) */
+  budgetMs?: number;
 }
 
 /** Contenido multimodal que el cliente envía al asistente */

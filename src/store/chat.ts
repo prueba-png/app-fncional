@@ -5,6 +5,7 @@ import * as db from "../db/db";
 import type { ChatMessage } from "../db/db";
 import { streamChat } from "../lib/api";
 import { getSample, sampleChat } from "../lib/runtime";
+import { streamDirect } from "../lib/directAi";
 import { uid } from "../lib/util";
 import { useStudio } from "./studio";
 
@@ -120,7 +121,7 @@ export const useChat = create<ChatState>((set, get) => ({
         text = result.text;
         model = "Claude (tu cuenta de claude.ai)";
         stopReason = result.truncated ? "max_tokens" : "end_turn";
-      } else await streamChat(
+      } else await (studio.ai === "direct" ? streamDirect : streamChat)(
         {
           apiKey: settings.anthropicApiKey || undefined,
           model: settings.model,

@@ -93,7 +93,13 @@ export function SettingsDialog() {
             <Icon name="eye" />
           </button>
         </div>
-        <small>Se guarda solo en este navegador (IndexedDB) y se envía únicamente a tu servidor local, que la usa para llamar a la API.</small>
+        <small>
+          Se guarda solo en este navegador y se usa únicamente para hablar con la IA de Anthropic. Consíguela en{" "}
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">
+            console.anthropic.com
+          </a>{" "}
+          (necesitas saldo en «Billing»).
+        </small>
       </label>
       <div className="row">
         <label className="field grow">

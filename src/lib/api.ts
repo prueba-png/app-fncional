@@ -36,6 +36,9 @@ export interface HealthInfo {
   version: string;
   hasEnvApiKey: boolean;
   defaultModel: string;
+  /** false en la versión publicada: la IA se llama directamente desde el navegador */
+  llm?: boolean;
+  hosted?: boolean;
 }
 
 export async function health(): Promise<HealthInfo | null> {

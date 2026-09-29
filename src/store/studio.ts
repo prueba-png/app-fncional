@@ -27,10 +27,11 @@ interface PendingAsk extends AskOptions {
 /**
  * De dónde sale la IA:
  * - "server": el servidor local (necesita clave de API de Anthropic);
+ * - "direct": versión publicada; el navegador llama a Anthropic con la clave del usuario;
  * - "claude": la cuenta de claude.ai del usuario, cuando la app se abre como página publicada;
  * - "none": ninguna disponible.
  */
-export type AiSource = "server" | "claude" | "none";
+export type AiSource = "server" | "direct" | "claude" | "none";
 
 export interface Toast {
   id: string;
@@ -99,11 +100,14 @@ interface StudioState {
 
 /** ¿Se puede usar la IA ahora mismo? */
 export function aiAvailable(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
-  return s.ai === "claude" || (s.ai === "server" && Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey));
+  if (s.ai === "claude") return true;
+  if (s.ai === "direct") return Boolean(s.settings.anthropicApiKey);
+  return s.ai === "server" && Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey);
 }
 
 /** Hay servidor local pero falta la clave de API. */
 export function needsApiKey(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
+  if (s.ai === "direct") return !s.settings.anthropicApiKey;
   return s.ai === "server" && !s.settings.anthropicApiKey && !s.health?.hasEnvApiKey;
 }
 
@@ -161,7 +165,7 @@ export const useStudio = create<StudioState>((set, get) => {
 
     async init() {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
-      set({ settings, projects, health: h, ai: h ? "server" : "none" });
+      set({ settings, projects, health: h, ai: h ? (h.llm === false ? "direct" : "server") : "none" });
       if (!h) {
         // Sin servidor local: se prueba la IA y las descargas del visor de claude.ai (no bloquea el arranque)
         void getSample().then(async (s) => {

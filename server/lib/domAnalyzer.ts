@@ -182,14 +182,19 @@ function assetKind(url: string, hint?: AssetRef["kind"]): AssetRef["kind"] {
   return "other";
 }
 
-async function fetchStylesheet(url: string, depth: number, warnings: string[], budget: { count: number }): Promise<string> {
+async function fetchStylesheet(url: string, depth: number, warnings: string[], budget: { count: number; deadline: number }): Promise<string> {
+  const remaining = budget.deadline - Date.now();
+  if (remaining < 500) {
+    warnings.push(`No dio tiempo a descargar ${url}.`);
+    return `/* omitido (tiempo): ${url} */`;
+  }
   if (budget.count >= MAX_STYLESHEETS) {
     warnings.push(`Se alcanzó el máximo de ${MAX_STYLESHEETS} hojas de estilo; ${url} no se incrustó.`);
     return `/* omitido (límite): ${url} */`;
   }
   budget.count++;
   try {
-    const res = await safeFetch(url, { maxBytes: MAX_CSS_BYTES, accept: "text/css,*/*;q=0.1", timeoutMs: 12000 });
+    const res = await safeFetch(url, { maxBytes: MAX_CSS_BYTES, accept: "text/css,*/*;q=0.1", timeoutMs: Math.min(12000, remaining) });
     if (res.status >= 400) {
       warnings.push(`La hoja ${url} respondió ${res.status}.`);
       return `/* error ${res.status}: ${url} */`;
@@ -218,9 +223,13 @@ function formatHtml(html: string): string {
 }
 
 export async function ingestUrl(opts: IngestOptions): Promise<IngestResult> {
-  const { keepScripts = false, inlineStylesheets = true } = opts;
+  const { keepScripts = false, inlineStylesheets = true, budgetMs = 60_000 } = opts;
+  const deadline = Date.now() + budgetMs;
   const warnings: string[] = [];
-  const res = await safeFetch(opts.url, { accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5" });
+  const res = await safeFetch(opts.url, {
+    accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+    timeoutMs: Math.min(15_000, Math.round(budgetMs * 0.6)),
+  });
   if (res.status >= 400) warnings.push(`La página respondió con estado HTTP ${res.status}.`);
   if (res.contentType && !/html|xml/i.test(res.contentType)) warnings.push(`Tipo de contenido inesperado: ${res.contentType}.`);
 
@@ -290,25 +299,25 @@ export async function ingestUrl(opts: IngestOptions): Promise<IngestResult> {
   });
 
   // --- hojas de estilo: extracción a styles.css ---
-  const cssParts: string[] = [];
-  const budget = { count: 0 };
+  // Las hojas externas se descargan en paralelo y se ensamblan en el orden original del documento
+  const budget = { count: 0, deadline: deadline - 500 };
   const styleNodes = $('link[rel~="stylesheet"], style').toArray();
+  const partPromises: Array<Promise<string>> = [];
   for (const el of styleNodes) {
     const $el = $(el);
+    const media = $el.attr("media");
+    const wrap = (label: string, css: string) => `/* ── ${label} ── */\n${media && media !== "all" ? `@media ${media} {\n${css}\n}` : css}`;
     if ((el as Element).tagName === "style") {
-      const media = $el.attr("media");
-      const css = rewriteCssUrls($el.html() ?? "", base);
-      cssParts.push(`/* ── <style> inline ── */\n${media && media !== "all" ? `@media ${media} {\n${css}\n}` : css}`);
+      partPromises.push(Promise.resolve(wrap("<style> inline", rewriteCssUrls($el.html() ?? "", base))));
       $el.remove();
     } else if (inlineStylesheets) {
       const href = $el.attr("href")!;
       if (/fonts\.googleapis\.com|use\.typekit\.net/.test(href)) continue; // se mantienen como <link>
-      const media = $el.attr("media");
-      const css = await fetchStylesheet(href, 0, warnings, budget);
-      cssParts.push(`/* ── ${href} ── */\n${media && media !== "all" ? `@media ${media} {\n${css}\n}` : css}`);
+      partPromises.push(fetchStylesheet(href, 0, warnings, budget).then((css) => wrap(href, css)));
       $el.remove();
     }
   }
+  const cssParts = await Promise.all(partPromises);
   const stylesCss = cssParts.join("\n\n");
   for (const m of stylesCss.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) addAsset(m[1], "css url()");
 

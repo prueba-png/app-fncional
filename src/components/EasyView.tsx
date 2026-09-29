@@ -54,7 +54,10 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
           </a>{" "}
           y crea una clave (API key).
         </li>
-        <li>Cópiala y pégala aquí:</li>
+        <li>
+          En «Billing», añade saldo (desde 5 $). Cada clon cuesta unos céntimos.
+        </li>
+        <li>Copia la clave y pégala aquí:</li>
       </ol>
       <div className="easy-input-row">
         <input
