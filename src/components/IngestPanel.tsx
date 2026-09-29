@@ -287,7 +287,7 @@ export function IngestPanel() {
 
   return (
     <div className="tool-body">
-      <ServerNotice feature="el análisis de URLs" />
+      <ServerNotice feature="el análisis detallado de URLs" />
       <div className="field">
         <span>URL pública a analizar</span>
         <div className="row">

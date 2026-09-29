@@ -109,6 +109,8 @@ export interface ChatRequest {
   activeFile?: string;
   attachments?: ChatAttachment[];
   mode?: "edit" | "generate-from-reference";
+  /** Permite a la IA leer páginas web (herramienta web_fetch); se usa para clonar por enlace sin servidor */
+  webFetch?: boolean;
 }
 
 /** Eventos SSE emitidos por /api/llm/chat */

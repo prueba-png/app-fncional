@@ -48,7 +48,7 @@ export function TelegramPanel() {
 
   return (
     <div className="tool-body">
-      <ServerNotice feature="la sincronización con Telegram" />
+      <ServerNotice feature="la sincronización con Telegram" worksServerless />
       <div className="card">
         <div className="row">
           <Icon name="cloud" size={20} />

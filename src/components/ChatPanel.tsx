@@ -97,7 +97,7 @@ export function ChatPanel() {
   return (
     <div className="tool-body flush">
       <div className="chat-log" ref={logRef} aria-live="polite">
-        {ai !== "claude" && <ServerNotice feature="el asistente de código" />}
+        {ai !== "claude" && <ServerNotice feature="el asistente de código" worksServerless />}
         {messages.length === 0 && !streaming && (
           <div className="empty">
             <Icon name="sparkles" size={28} />

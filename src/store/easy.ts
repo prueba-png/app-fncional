@@ -151,13 +151,13 @@ export const useEasy = create<EasyState>((set, get) => {
   };
 
   /** Envía la petición a la IA y termina el trabajo con la vista previa o un error comprensible */
-  const runAi = async (prompt: string, attachments: ChatAttachment[], labels: string[]) => {
+  const runAi = async (prompt: string, attachments: ChatAttachment[], labels: string[], extra: { webFetch?: boolean; note?: string } = {}) => {
     advance(1);
     const unsubscribe = useChat.subscribe((s) => {
       if (s.streamText.includes("<file")) advance(2);
     });
     try {
-      await useChat.getState().send(prompt, { attachments, attachmentLabels: labels, mode: "generate-from-reference" });
+      await useChat.getState().send(prompt, { attachments, attachmentLabels: labels, mode: "generate-from-reference", webFetch: extra.webFetch });
     } finally {
       unsubscribe();
     }
@@ -175,7 +175,7 @@ export const useEasy = create<EasyState>((set, get) => {
       return;
     }
     advance(3);
-    finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : undefined);
+    finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : extra.note);
   };
 
   return {
@@ -227,7 +227,52 @@ export const useEasy = create<EasyState>((set, get) => {
       lastInput = { kind: "url", url: typed };
       abortController = new AbortController();
       const host = new URL(url).hostname;
-      if (!useStudio.getState().health) {
+      const studioState = useStudio.getState();
+      if (!studioState.health && studioState.ai === "direct") {
+        // Sin servidor: la IA visita la web con su herramienta web_fetch y la reconstruye
+        set({
+          stage: "working",
+          job: {
+            kind: "url",
+            title: `Clonando ${host}`,
+            usesAi: true,
+            steps: [
+              { label: "Preparando", state: "active" },
+              { label: "La IA está visitando la web", state: "pending" },
+              { label: "Construyendo la página", state: "pending" },
+              { label: "Preparando la vista previa", state: "pending" },
+            ],
+          },
+        });
+        if (needsApiKey(studioState)) {
+          fail("Para clonar webs necesitas conectar la IA (solo una vez).", { needsKey: true });
+          return;
+        }
+        try {
+          await studioState.createProject({
+            name: host,
+            files: { "index.html": "", "styles.css": "", "script.js": "" },
+            origin: { type: "url", detail: url },
+          });
+          await runAi(
+            `Usa la herramienta web_fetch para leer ${url} y clona esa página con la máxima fidelidad posible.
+- Reproduce su estructura, secciones, textos, navegación, formularios y enlaces principales.
+- Deduce el estilo visual (colores, tipografía, espaciados) de la marca y del contenido; usa las imágenes de la página por su URL absoluta cuando aparezcan.
+- Crea una página completa: index.html, styles.css y script.js, responsive.
+- Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,
+            [],
+            [],
+            {
+              webFetch: true,
+              note: "Clon hecho por la IA a partir del contenido de la web: la estructura y los textos son fieles, el diseño es aproximado. Para un resultado más exacto, sube también una captura.",
+            },
+          );
+        } catch (err) {
+          fail(friendlyAiError((err as Error).message));
+        }
+        return;
+      }
+      if (!studioState.health) {
         set({
           stage: "working",
           job: { kind: "url", title: `Clonar ${host}`, usesAi: false, steps: [{ label: "Descargando la página", state: "active" }] },

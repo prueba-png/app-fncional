@@ -3,8 +3,8 @@ import type { FileMap } from "../../shared/types";
 import { sanitizePath } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { Project, Settings, Version, VersionSource } from "../db/db";
-import { health, type HealthInfo } from "../lib/api";
-import { canSaveFiles, getSample, sampleSupportsImages } from "../lib/runtime";
+import { health, setServerless, type HealthInfo } from "../lib/api";
+import { canSaveFiles, getSample, hasViewerRuntime, sampleSupportsImages } from "../lib/runtime";
 import { TEMPLATES } from "../lib/templates";
 import { uid } from "../lib/util";
 import type { ProjectBundle } from "../lib/zip";
@@ -166,7 +166,11 @@ export const useStudio = create<StudioState>((set, get) => {
     async init() {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
       set({ settings, projects, health: h, ai: h ? (h.llm === false ? "direct" : "server") : "none" });
-      if (!h) {
+      if (!h && !hasViewerRuntime()) {
+        // Versión de un solo archivo en cualquier alojamiento: todo ocurre en el navegador
+        setServerless(true);
+        set({ ai: "direct" });
+      } else if (!h) {
         // Sin servidor local: se prueba la IA y las descargas del visor de claude.ai (no bloquea el arranque)
         void getSample().then(async (s) => {
           if (!s) return;
@@ -189,7 +193,7 @@ export const useStudio = create<StudioState>((set, get) => {
       }
       set({ ready: true });
       if (db.memoryOnly) get().toast("El navegador no permite guardar datos: los cambios solo duran mientras la pestaña esté abierta.", "info");
-      if (!h && !IS_DEMO) get().toast("No se detecta el servidor local: el análisis de URLs, el asistente y Telegram no estarán disponibles.", "error");
+      if (!h && !IS_DEMO && hasViewerRuntime()) get().toast("No se detecta el servidor local: el análisis de URLs, el asistente y Telegram no estarán disponibles.", "error");
     },
 
     toast(message, kind = "info") {

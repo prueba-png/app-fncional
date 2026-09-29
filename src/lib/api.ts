@@ -8,6 +8,9 @@ import type {
   TelegramTestResponse,
 } from "../../shared/types";
 
+import { browserTelegramBackup, browserTelegramRestore, browserTelegramTest } from "./telegramBrowser";
+import { blobToBase64 } from "./util";
+
 const HEADERS = { "content-type": "application/json", "x-devstudio": "1" };
 
 async function readError(res: Response): Promise<Error> {
@@ -52,12 +55,22 @@ export async function health(): Promise<HealthInfo | null> {
 
 export const ingest = (opts: IngestOptions, signal?: AbortSignal) => post<IngestResult>("/api/ingest", opts, signal);
 
-export const telegramTest = (c: TelegramCredentials) => post<TelegramTestResponse>("/api/telegram/test", c);
+/** Sin servidor (versión de un solo archivo), Telegram se llama directamente desde el navegador. */
+let serverless = false;
+export function setServerless(value: boolean) {
+  serverless = value;
+}
 
-export const telegramBackup = (c: TelegramCredentials, filename: string, caption: string, data: string) =>
-  post<TelegramBackupResponse>("/api/telegram/backup", { ...c, filename, caption, data });
+export const telegramTest = (c: TelegramCredentials) =>
+  serverless ? browserTelegramTest(c) : post<TelegramTestResponse>("/api/telegram/test", c);
+
+export async function telegramBackup(c: TelegramCredentials, filename: string, caption: string, blob: Blob): Promise<TelegramBackupResponse> {
+  if (serverless) return browserTelegramBackup(c, filename, caption, blob);
+  return post<TelegramBackupResponse>("/api/telegram/backup", { ...c, filename, caption, data: await blobToBase64(blob) });
+}
 
 export async function telegramRestore(token: string, fileId: string): Promise<Blob> {
+  if (serverless) return browserTelegramRestore(token, fileId);
   return (await request("/api/telegram/restore", { token, fileId })).blob();
 }
 

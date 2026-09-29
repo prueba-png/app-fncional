@@ -5,7 +5,7 @@
 import * as db from "../db/db";
 import { useStudio } from "../store/studio";
 import { telegramBackup, telegramRestore } from "./api";
-import { blobToBase64, formatBytes, slugify, uid } from "./util";
+import { formatBytes, slugify, uid } from "./util";
 import { createBackupBundle, readZip, type ProjectBundle } from "./zip";
 
 export function telegramReady(): boolean {
@@ -37,7 +37,7 @@ export async function backupToTelegram(scope: "project" | "all", projectId?: str
     `💾 ${formatBytes(blob.size)} · ${new Date().toLocaleString("es")}`,
   ].join("\n");
 
-  const res = await telegramBackup({ token, chatId }, filename, caption, await blobToBase64(blob));
+  const res = await telegramBackup({ token, chatId }, filename, caption, blob);
   const record: db.BackupRecord = {
     id: uid("b_"),
     scope,

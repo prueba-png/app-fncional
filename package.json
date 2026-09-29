@@ -2,7 +2,7 @@
   "name": "devstudio-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "Entorno de desarrollo local para análisis estructural de UI, prototipado rápido y respaldo descentralizado vía Telegram.",
+  "description": "Entorno de desarrollo local para an\u00e1lisis estructural de UI, prototipado r\u00e1pido y respaldo descentralizado v\u00eda Telegram.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -16,7 +16,8 @@
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
-    "build:demo": "cross-env VITE_DEMO=1 vite build --outDir dist-demo --emptyOutDir"
+    "build:demo": "cross-env VITE_DEMO=1 SINGLE_FILE=1 vite build --outDir dist-demo --emptyOutDir",
+    "build:standalone": "cross-env SINGLE_FILE=1 vite build --outDir dist-standalone --emptyOutDir && node scripts/inline-html.mjs dist-standalone devstudio-pro.html"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

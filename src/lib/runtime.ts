@@ -46,6 +46,11 @@ function runtime(): ClaudeRuntime | null {
   return c && typeof c.use === "function" ? c : null;
 }
 
+/** ¿Se está ejecutando dentro del visor de claude.ai? */
+export function hasViewerRuntime(): boolean {
+  return runtime() !== null;
+}
+
 export async function getSample(): Promise<SampleFn | null> {
   const rt = runtime();
   if (!rt) return null;

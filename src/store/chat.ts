@@ -15,6 +15,7 @@ interface SendOptions {
   attachments?: ChatAttachment[];
   attachmentLabels?: string[];
   mode?: "edit" | "generate-from-reference";
+  webFetch?: boolean;
 }
 
 interface ChatState {
@@ -132,6 +133,7 @@ export const useChat = create<ChatState>((set, get) => ({
           activeFile: project.activeFile,
           attachments: opts.attachments,
           mode: opts.mode ?? "edit",
+          webFetch: opts.webFetch,
         },
         (e) => {
           if (e.type === "text") {

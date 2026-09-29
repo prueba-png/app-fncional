@@ -67,30 +67,49 @@ export async function runClaudeChat(
   const useFallbacks = FALLBACK_MODELS.has(model);
   const supportsAdaptive = !model.startsWith("claude-haiku");
   const system = body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
+  const tools: Anthropic.Beta.BetaToolUnion[] | undefined = body.webFetch
+    ? [{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 4, max_content_tokens: 100_000 }]
+    : undefined;
 
-  const stream = client.beta.messages.stream({
-    model,
-    max_tokens: 64000,
-    system,
-    // Haiku 4.5 no admite pensamiento adaptativo ni `effort`
-    ...(supportsAdaptive ? { thinking: { type: "adaptive" as const }, output_config: { effort: body.effort ?? "high" } } : {}),
-    messages,
-    ...(useFallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-  });
-  const onAbort = () => stream.abort();
+  let current: ReturnType<typeof client.beta.messages.stream> | null = null;
+  const onAbort = () => current?.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
 
   emit({ type: "status", message: `Generando con ${model}…` });
   try {
-    for await (const event of stream) {
-      if (signal?.aborted) return;
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        emit({ type: "text", text: event.delta.text });
-      } else if (event.type === "content_block_start" && event.content_block.type === "fallback") {
-        emit({ type: "status", message: `Respuesta continuada por ${event.content_block.to.model}` });
+    let conversation = messages;
+    let final: Anthropic.Beta.BetaMessage | null = null;
+    // Las herramientas de servidor (web_fetch) pueden pausar el turno: se reenvía lo recibido para que continúe
+    for (let round = 0; round < 4; round++) {
+      const stream = client.beta.messages.stream({
+        model,
+        max_tokens: 64000,
+        system,
+        // Haiku 4.5 no admite pensamiento adaptativo ni `effort`
+        ...(supportsAdaptive ? { thinking: { type: "adaptive" as const }, output_config: { effort: body.effort ?? "high" } } : {}),
+        messages: conversation,
+        ...(tools ? { tools } : {}),
+        ...(useFallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+      });
+      current = stream;
+      for await (const event of stream) {
+        if (signal?.aborted) return;
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          emit({ type: "text", text: event.delta.text });
+        } else if (event.type === "content_block_start") {
+          const block = event.content_block;
+          if (block.type === "fallback") emit({ type: "status", message: `Respuesta continuada por ${block.to.model}` });
+          else if (block.type === "server_tool_use" && block.name === "web_fetch") emit({ type: "status", message: "Visitando la web…" });
+          else if (block.type === "web_fetch_tool_result" && (block.content as { type?: string }).type === "web_fetch_tool_result_error") {
+            emit({ type: "status", message: `No se pudo leer la web (${(block.content as { error_code?: string }).error_code ?? "error"})` });
+          }
+        }
       }
+      final = await stream.finalMessage();
+      if (final.stop_reason !== "pause_turn") break;
+      conversation = [...conversation, { role: "assistant", content: final.content }];
     }
-    const final = await stream.finalMessage();
+    if (!final) return;
     if (final.stop_reason === "refusal") {
       emit({ type: "error", message: "El modelo ha declinado esta petición. Reformúlala e inténtalo de nuevo." });
     }

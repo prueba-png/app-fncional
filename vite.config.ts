@@ -19,7 +19,9 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 2500,
+    // Versión de un solo archivo y demo publicada: todo el JavaScript en un único fichero
+    ...(process.env.SINGLE_FILE === "1" ? { rollupOptions: { output: { inlineDynamicImports: true } } } : {}),
   },
   test: {
     environment: "node",
