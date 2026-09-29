@@ -233,15 +233,50 @@ export async function deleteBackupRecord(id: string) {
 }
 
 // ── Ajustes ────────────────────────────────────────────────────────────────
+/** Claves secretas: en alojamientos con origen compartido no se guardan de forma permanente. */
+const SECRET_KEYS = new Set<keyof Settings>(["anthropicApiKey", "telegramToken"]);
+const SHARED_ORIGIN_HOSTS = ["raw.githack.com", "rawcdn.githack.com", "cdn.statically.io", "htmlpreview.github.io"];
+
+/**
+ * ¿Comparte la página su origen con webs de otras personas? (p. ej. githack sirve todos los
+ * repositorios desde el mismo dominio, así que su almacenamiento es común a todos ellos).
+ */
+export function isSharedOrigin(): boolean {
+  return typeof location !== "undefined" && SHARED_ORIGIN_HOSTS.includes(location.hostname);
+}
+
+function sessionGet(key: string): string | null {
+  try {
+    return sessionStorage.getItem(`devstudio:${key}`);
+  } catch {
+    return null;
+  }
+}
+function sessionSet(key: string, value: string) {
+  try {
+    sessionStorage.setItem(`devstudio:${key}`, value);
+  } catch {
+    /* sin almacenamiento de sesión */
+  }
+}
+
 export async function loadSettings(): Promise<Settings> {
   const rows = await (await getDB()).getAll("settings");
   const out: Record<string, unknown> = { ...DEFAULT_SETTINGS };
-  for (const r of rows) if (r.key in DEFAULT_SETTINGS) out[r.key] = r.value;
+  const shared = isSharedOrigin();
+  for (const r of rows) if (r.key in DEFAULT_SETTINGS && !(shared && SECRET_KEYS.has(r.key as keyof Settings))) out[r.key] = r.value;
+  if (shared) for (const k of SECRET_KEYS) out[k] = sessionGet(k) ?? "";
   return out as unknown as Settings;
 }
 export async function saveSettings(s: Partial<Settings>) {
+  const shared = isSharedOrigin();
   const db = await getDB();
   const tx = db.transaction("settings", "readwrite");
-  for (const [key, value] of Object.entries(s)) await tx.store.put({ key, value });
+  for (const [key, value] of Object.entries(s)) {
+    if (shared && SECRET_KEYS.has(key as keyof Settings)) {
+      sessionSet(key, String(value ?? ""));
+      await tx.store.delete(key); // por si quedó guardada antes
+    } else await tx.store.put({ key, value });
+  }
   await tx.done;
 }

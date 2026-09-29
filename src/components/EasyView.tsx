@@ -7,6 +7,7 @@ import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
+import { isSharedOrigin } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { Icon } from "./Icon";
 
@@ -75,7 +76,11 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
           Guardar
         </button>
       </div>
-      <small className="muted">La clave se guarda solo en este navegador.</small>
+      <small className="muted">
+        {isSharedOrigin()
+          ? "Por seguridad, en este enlace la clave solo se recuerda mientras la pestaña esté abierta."
+          : "La clave se guarda solo en este navegador."}
+      </small>
     </div>
   );
 }
