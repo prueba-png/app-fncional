@@ -31,7 +31,7 @@ function extensionsFor(path: string) {
 
 export function EditorPane() {
   const project = useStudio((s) => s.project);
-  const { setActiveFile, updateFile, addFile, renameFile, deleteFile } = useStudio.getState();
+  const { setActiveFile, updateFile, addFile, renameFile, deleteFile, ask } = useStudio.getState();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
@@ -87,9 +87,15 @@ export function EditorPane() {
                 className="close"
                 role="button"
                 aria-label={`Eliminar ${p}`}
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  if (confirm(`¿Eliminar el fichero «${p}»? Podrás recuperarlo desde el historial si estaba versionado.`)) deleteFile(p);
+                  const ok = await ask({
+                    title: `Eliminar ${p}`,
+                    message: "Podrás recuperarlo desde el historial si estaba incluido en alguna versión.",
+                    confirmLabel: "Eliminar",
+                    danger: true,
+                  });
+                  if (ok !== null) deleteFile(p);
                 }}
               >
                 <Icon name="x" size={12} />

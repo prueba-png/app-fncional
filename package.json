@@ -15,7 +15,8 @@
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit && vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:demo": "cross-env VITE_DEMO=1 vite build --outDir dist-demo --emptyOutDir"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",
@@ -33,6 +34,7 @@
     "domhandler": "^6.0.1",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
+    "fake-indexeddb": "^6.2.5",
     "idb": "^8.0.3",
     "jszip": "^3.10.2",
     "react": "^19.3.0",

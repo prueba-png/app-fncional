@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useStudio } from "../store/studio";
+import { useStudio, IS_DEMO } from "../store/studio";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { downloadBlob, slugify } from "../lib/util";
@@ -68,18 +68,29 @@ export function TopBar() {
         onBlur={() => (name.trim() ? void renameProject(project.id, name) : setName(project.name))}
         onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       />
-      <span className="badge" title={health ? "Servidor local conectado" : "Servidor local no disponible"}>
-        <span className={`dot${health ? " ok" : ""}`} /> {health ? "local" : "sin servidor"}
-      </span>
+      {IS_DEMO ? (
+        <span className="badge warning" title="Versión web de demostración: el análisis de URLs, el asistente y Telegram necesitan el servidor local">
+          demo web
+        </span>
+      ) : (
+        <span className="badge" title={health ? "Servidor local conectado" : "Servidor local no disponible"}>
+          <span className={`dot${health ? " ok" : ""}`} /> {health ? "local" : "sin servidor"}
+        </span>
+      )}
       <div className="spacer" />
       <button className="btn" onClick={snapshot} title="Guardar versión (Ctrl+S)">
-        <Icon name="save" /> Guardar versión
+        <Icon name="save" /> <span className="label">Guardar versión</span>
       </button>
-      <button className="btn" onClick={exportZip} disabled={busy === "zip"} title="Descargar el código fuente como ZIP">
-        {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} Exportar ZIP
+      <button
+        className="btn"
+        onClick={exportZip}
+        disabled={busy === "zip" || IS_DEMO}
+        title={IS_DEMO ? "Las descargas están bloqueadas en la demo web" : "Descargar el código fuente como ZIP"}
+      >
+        {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} <span className="label">Exportar ZIP</span>
       </button>
       <button className="btn" onClick={backup} disabled={busy === "tg"} title="Respaldar este proyecto en tu chat de Telegram">
-        {busy === "tg" ? <span className="spinner" /> : <Icon name="cloud" />} Sincronizar
+        {busy === "tg" ? <span className="spinner" /> : <Icon name="cloud" />} <span className="label">Sincronizar</span>
       </button>
       <button className="btn icon" onClick={() => setSettingsOpen(true)} title="Ajustes" aria-label="Ajustes">
         <Icon name="settings" />

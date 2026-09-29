@@ -10,6 +10,19 @@ import type { ProjectBundle } from "../lib/zip";
 
 export type ToolTab = "chat" | "history" | "ingest" | "references" | "dependencies" | "telegram";
 
+export interface AskOptions {
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  /** Si se indica, el diálogo muestra un campo de texto y devuelve su valor */
+  input?: { label: string; defaultValue?: string };
+}
+
+interface PendingAsk extends AskOptions {
+  resolve: (value: string | null) => void;
+}
+
 export interface Toast {
   id: string;
   kind: "info" | "success" | "error";
@@ -27,8 +40,12 @@ interface StudioState {
   toasts: Toast[];
   settingsOpen: boolean;
   newProjectOpen: boolean;
+  pendingAsk: PendingAsk | null;
 
   init(): Promise<void>;
+  /** Confirmación dentro de la página (sustituye a confirm/prompt). Devuelve null si se cancela. */
+  ask(opts: AskOptions): Promise<string | null>;
+  resolveAsk(value: string | null): void;
   toast(message: string, kind?: Toast["kind"]): void;
   dismissToast(id: string): void;
   setTab(tab: ToolTab): void;
@@ -67,6 +84,9 @@ interface StudioState {
   importBundles(bundles: ProjectBundle[], origin: Project["origin"]["type"]): Promise<number>;
 }
 
+/** Compilación de demostración sin servidor local (VITE_DEMO=1). */
+export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+
 const LAST_PROJECT_KEY = "devstudio:lastProject";
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -101,6 +121,17 @@ export const useStudio = create<StudioState>((set, get) => {
     toasts: [],
     settingsOpen: false,
     newProjectOpen: false,
+    pendingAsk: null,
+
+    ask(opts) {
+      get().pendingAsk?.resolve(null);
+      return new Promise((resolve) => set({ pendingAsk: { ...opts, resolve } }));
+    },
+    resolveAsk(value) {
+      const pending = get().pendingAsk;
+      set({ pendingAsk: null });
+      pending?.resolve(value);
+    },
 
     async init() {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
@@ -118,7 +149,8 @@ export const useStudio = create<StudioState>((set, get) => {
         await get().createProject({ name: "Mi primer prototipo", files: tpl.files, origin: { type: "template", detail: tpl.id } });
       }
       set({ ready: true });
-      if (!h) get().toast("No se detecta el servidor local: el análisis de URLs, el asistente y Telegram no estarán disponibles.", "error");
+      if (db.memoryOnly) get().toast("El navegador no permite guardar datos: los cambios solo duran mientras la pestaña esté abierta.", "info");
+      if (!h && !IS_DEMO) get().toast("No se detecta el servidor local: el análisis de URLs, el asistente y Telegram no estarán disponibles.", "error");
     },
 
     toast(message, kind = "info") {

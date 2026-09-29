@@ -3,6 +3,7 @@
  * versiones, conversaciones, referencias visuales, copias de seguridad y ajustes.
  */
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import * as fakeIDB from "fake-indexeddb";
 import type { FileMap, IngestResult } from "../../shared/types";
 
 export type IngestReport = Omit<IngestResult, "files">;
@@ -111,8 +112,11 @@ interface StudioDB extends DBSchema {
 
 let dbPromise: Promise<IDBPDatabase<StudioDB>> | null = null;
 
-export function getDB() {
-  dbPromise ??= openDB<StudioDB>("devstudio-pro", 1, {
+/** true si IndexedDB no está disponible y los datos solo viven en memoria durante la sesión. */
+export let memoryOnly = false;
+
+function open() {
+  return openDB<StudioDB>("devstudio-pro", 1, {
     upgrade(db) {
       db.createObjectStore("projects", { keyPath: "id" }).createIndex("byUpdated", "updatedAt");
       db.createObjectStore("versions", { keyPath: "id" }).createIndex("byProject", "projectId");
@@ -122,6 +126,28 @@ export function getDB() {
       db.createObjectStore("settings", { keyPath: "key" });
     },
   });
+}
+
+async function openWithFallback() {
+  try {
+    if (typeof indexedDB === "undefined") throw new Error("IndexedDB no disponible");
+    return await Promise.race([
+      open(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("IndexedDB no responde")), 4000)),
+    ]);
+  } catch {
+    // Navegación privada, almacenamiento bloqueado o entornos incrustados: se usa una implementación en memoria.
+    for (const [name, value] of Object.entries(fakeIDB)) {
+      if (name === "default") continue;
+      Object.defineProperty(globalThis, name, { value, configurable: true, writable: true, enumerable: false });
+    }
+    memoryOnly = true;
+    return open();
+  }
+}
+
+export function getDB() {
+  dbPromise ??= openWithFallback();
   return dbPromise;
 }
 

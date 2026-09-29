@@ -53,7 +53,7 @@ function computeDiff(from: FileMap, to: FileMap): FileDiff[] {
 export function HistoryPanel() {
   const versions = useStudio((s) => s.versions);
   const files = useStudio((s) => s.project?.files ?? {});
-  const { restoreVersion, commit, toast } = useStudio.getState();
+  const { restoreVersion, commit, toast, ask } = useStudio.getState();
   const [selected, setSelected] = useState<string | null>(null);
   const [compare, setCompare] = useState<"previous" | "current">("previous");
 
@@ -78,7 +78,11 @@ export function HistoryPanel() {
           className="btn sm primary"
           disabled={!dirty}
           onClick={async () => {
-            const label = prompt("Descripción de la versión:", "Instantánea manual");
+            const label = await ask({
+              title: "Guardar versión",
+              confirmLabel: "Guardar",
+              input: { label: "Descripción de la versión", defaultValue: "Instantánea manual" },
+            });
             if (label === null) return;
             const v = await commit(label.trim() || "Instantánea manual", "manual");
             toast(v ? "Versión guardada" : "Sin cambios", v ? "success" : "info");
@@ -105,7 +109,14 @@ export function HistoryPanel() {
               </button>
               <button
                 className="btn sm"
-                onClick={() => confirm(`¿Restaurar «${v.message}»? El estado actual se guardará antes como versión.`) && void restoreVersion(v.id)}
+                onClick={async () => {
+                  const ok = await ask({
+                    title: "Restaurar versión",
+                    message: `Se restaurará «${v.message}». El estado actual se guardará antes como una versión nueva.`,
+                    confirmLabel: "Restaurar",
+                  });
+                  if (ok !== null) await restoreVersion(v.id);
+                }}
               >
                 <Icon name="history" size={12} /> Restaurar
               </button>

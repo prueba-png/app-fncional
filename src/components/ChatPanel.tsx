@@ -4,6 +4,7 @@ import { useChat } from "../store/chat";
 import { useStudio } from "../store/studio";
 import type { ChatMessage } from "../db/db";
 import { Icon } from "./Icon";
+import { ServerNotice } from "./ServerNotice";
 
 const SUGGESTIONS = [
   "Añade un formulario de contacto accesible con validación",
@@ -25,7 +26,7 @@ function Prose({ text }: { text: string }) {
 
 function AssistantMessage({ m }: { m: ChatMessage }) {
   const versions = useStudio((s) => s.versions);
-  const { restoreVersion, setTab } = useStudio.getState();
+  const { restoreVersion, setTab, ask } = useStudio.getState();
   const parsed = parseFileBlocks(m.content);
   const idx = m.meta?.versionId ? versions.findIndex((v) => v.id === m.meta!.versionId) : -1;
   const previous = idx >= 0 ? versions[idx + 1] : undefined;
@@ -53,7 +54,10 @@ function AssistantMessage({ m }: { m: ChatMessage }) {
           <button
             className="btn sm ghost"
             title="Restaura la versión anterior a este cambio"
-            onClick={() => confirm("¿Revertir los cambios aplicados por esta respuesta?") && void restoreVersion(previous.id)}
+            onClick={async () => {
+              const ok = await ask({ title: "Revertir cambios", message: "Se restaurará la versión anterior a esta respuesta.", confirmLabel: "Revertir" });
+              if (ok !== null) await restoreVersion(previous.id);
+            }}
           >
             <Icon name="history" size={12} /> Revertir
           </button>
@@ -92,6 +96,7 @@ export function ChatPanel() {
   return (
     <div className="tool-body flush">
       <div className="chat-log" ref={logRef} aria-live="polite">
+        <ServerNotice feature="el asistente de código" />
         {messages.length === 0 && !streaming && (
           <div className="empty">
             <Icon name="sparkles" size={28} />
@@ -164,7 +169,15 @@ export function ChatPanel() {
           <button
             className="btn sm ghost"
             disabled={streaming || messages.length === 0}
-            onClick={() => confirm("¿Borrar la conversación de este proyecto? El código y el historial no se modifican.") && void clear()}
+            onClick={async () => {
+              const ok = await useStudio.getState().ask({
+                title: "Borrar conversación",
+                message: "El código y el historial de versiones no se modifican.",
+                confirmLabel: "Borrar",
+                danger: true,
+              });
+              if (ok !== null) await clear();
+            }}
           >
             <Icon name="trash" size={12} /> Limpiar chat
           </button>

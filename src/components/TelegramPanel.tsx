@@ -5,6 +5,7 @@ import type { BackupRecord } from "../db/db";
 import { backupToTelegram, restoreFromTelegram, telegramReady } from "../lib/backup";
 import { formatBytes, timeAgo } from "../lib/util";
 import { Icon } from "./Icon";
+import { ServerNotice } from "./ServerNotice";
 
 export function TelegramPanel() {
   const settings = useStudio((s) => s.settings);
@@ -47,6 +48,7 @@ export function TelegramPanel() {
 
   return (
     <div className="tool-body">
+      <ServerNotice feature="la sincronización con Telegram" />
       <div className="card">
         <div className="row">
           <Icon name="cloud" size={20} />

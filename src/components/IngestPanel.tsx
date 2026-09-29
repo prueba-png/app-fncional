@@ -6,6 +6,7 @@ import type { IngestReport } from "../db/db";
 import type { AssetRef } from "../../shared/types";
 import { formatBytes } from "../lib/util";
 import { Icon } from "./Icon";
+import { ServerNotice } from "./ServerNotice";
 
 function Report({ r }: { r: IngestReport }) {
   const { toast, setTab } = useStudio.getState();
@@ -286,6 +287,7 @@ export function IngestPanel() {
 
   return (
     <div className="tool-body">
+      <ServerNotice feature="el análisis de URLs" />
       <div className="field">
         <span>URL pública a analizar</span>
         <div className="row">

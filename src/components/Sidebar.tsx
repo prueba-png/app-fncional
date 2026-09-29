@@ -16,7 +16,7 @@ const ORIGIN_LABEL: Record<string, string> = {
 export function Sidebar() {
   const projects = useStudio((s) => s.projects);
   const currentId = useStudio((s) => s.project?.id);
-  const { openProject, renameProject, duplicateProject, deleteProject, setNewProjectOpen, importBundles, toast } = useStudio.getState();
+  const { openProject, renameProject, duplicateProject, deleteProject, setNewProjectOpen, importBundles, toast, ask } = useStudio.getState();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -107,9 +107,14 @@ export function Sidebar() {
                 className="btn sm icon ghost danger"
                 title="Eliminar"
                 aria-label={`Eliminar ${p.name}`}
-                onClick={() => {
-                  if (confirm(`¿Eliminar «${p.name}» junto con su historial, chat y referencias? Esta acción no se puede deshacer.`))
-                    void deleteProject(p.id);
+                onClick={async () => {
+                  const ok = await ask({
+                    title: `Eliminar «${p.name}»`,
+                    message: "Se borrarán también su historial, su conversación y sus referencias. Esta acción no se puede deshacer.",
+                    confirmLabel: "Eliminar proyecto",
+                    danger: true,
+                  });
+                  if (ok !== null) await deleteProject(p.id);
                 }}
               >
                 <Icon name="trash" size={13} />

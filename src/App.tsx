@@ -9,6 +9,7 @@ import { ToolPanel } from "./components/ToolPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Toasts } from "./components/Toasts";
+import { AskDialog } from "./components/AskDialog";
 import { useAutoBackup } from "./hooks/useAutoBackup";
 
 export function App() {
@@ -104,6 +105,7 @@ export function App() {
       </div>
       <SettingsDialog />
       <NewProjectDialog />
+      <AskDialog />
       <Toasts />
     </div>
   );
