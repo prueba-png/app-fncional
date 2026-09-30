@@ -36,7 +36,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
   const save = async () => {
     const provider = detectProvider(key);
     if (!provider) {
-      toast("Esa clave no parece de Google (empieza por «AIza»). Cópiala completa desde aistudio.google.com.", "error");
+      toast("Esa clave no parece de Google (empieza por «AIza» o «AQ»). Cópiala completa desde aistudio.google.com.", "error");
       return;
     }
     const field = provider === "gemini" ? "geminiApiKey" : provider === "openrouter" ? "openrouterApiKey" : "anthropicApiKey";
@@ -63,7 +63,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
           con tu cuenta de Google.
         </li>
         <li>Pulsa «Create API key» (Crear clave de API). Es gratis.</li>
-        <li>Copia la clave (empieza por «AIza…») y pégala aquí:</li>
+        <li>Copia la clave (empieza por «AIza…» o «AQ…») y pégala aquí:</li>
       </ol>
       <div className="easy-input-row">
         <input
@@ -71,7 +71,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
           className="input"
           type="password"
           autoComplete="off"
-          placeholder="AIza…"
+          placeholder="AIza… o AQ…"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void save()}

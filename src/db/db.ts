@@ -328,7 +328,8 @@ export function providerKey(s: Pick<Settings, "aiProvider" | "geminiApiKey" | "o
 /** Reconoce de qué servicio es una clave por su formato */
 export function detectProvider(key: string): AiProvider | null {
   const k = key.trim();
-  if (/^AIza[\w-]{30,}$/.test(k)) return "gemini";
+  // Google: formato clásico «AIza…» y el nuevo, que empieza por «AQ»
+  if (/^(?:AIza|AQ)[\w.-]{20,}$/.test(k)) return "gemini";
   if (/^sk-or-/.test(k)) return "openrouter";
   if (/^sk-ant-/.test(k)) return "anthropic";
   return null;

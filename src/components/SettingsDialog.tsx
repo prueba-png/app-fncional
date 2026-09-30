@@ -110,7 +110,7 @@ export function SettingsDialog() {
               className="input mono"
               type={showKey ? "text" : "password"}
               autoComplete="off"
-              placeholder="AIza…"
+              placeholder="AIza… o AQ…"
               value={draft.geminiApiKey}
               onChange={(e) => set("geminiApiKey", e.target.value)}
             />

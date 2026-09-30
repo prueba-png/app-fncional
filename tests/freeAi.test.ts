@@ -12,6 +12,8 @@ const req = { apiKey: "k", history: [], prompt: "Hola", files: { "index.html": "
 describe("IA gratuita", () => {
   it("reconoce el servicio por la clave", () => {
     expect(detectProvider("AIzaSyA1234567890abcdefghijklmnopqrstuv")).toBe("gemini");
+    expect(detectProvider("AQ.Ab8RN6Kx1234567890abcdefghijklmnop")).toBe("gemini");
+    expect(detectProvider("AQ")).toBeNull();
     expect(detectProvider("sk-or-v1-abc")).toBe("openrouter");
     expect(detectProvider("sk-ant-api03-x")).toBe("anthropic");
     expect(detectProvider("hola")).toBeNull();
