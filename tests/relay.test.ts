@@ -76,3 +76,24 @@ describe("clonado de webs hechas con JavaScript", () => {
     expect(r.files["index.html"]).toContain('<meta name="referrer" content="no-referrer">');
   });
 });
+
+describe("respuestas de error de los servicios", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("descarta el JSON de error de un servicio (clave requerida) y usa otro", async () => {
+    const PAGE3 = `<!doctype html><html lang="es"><head><title>OK</title></head><body><h1>Bienvenido a la tienda de prueba</h1><p>Contenido real de la página.</p></body></html>`;
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      const u = new URL(input);
+      seen.push(u.hostname);
+      const target = u.searchParams.get("url") ?? u.searchParams.get("quest") ?? decodeURIComponent(input.split("/fetch/")[1] ?? "");
+      // El primer servicio responde 200 con un JSON de error (necesita clave)
+      if (u.hostname === "api.allorigins.win" && u.pathname === "/raw")
+        return new Response('{"error":"A valid API key is required. Get one at https://console.example.io/"}', { status: 200, headers: { "content-type": "application/json" } });
+      if (target === "https://tienda2.example/") return new Response(PAGE3, { headers: { "content-type": "text/html" } });
+      return new Response("", { status: 404 });
+    });
+    const r = await ingestViaRelay({ url: "https://tienda2.example/" });
+    expect(r.files["index.html"]).toContain("Bienvenido a la tienda de prueba");
+    expect(r.files["index.html"]).not.toContain("API key");
+  });
+});

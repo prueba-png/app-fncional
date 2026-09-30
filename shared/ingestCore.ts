@@ -124,8 +124,11 @@ async function fetchStylesheetResult(
       warnings.push(`La hoja ${url} respondió ${res.status}.`);
       return { ok: false, css: "" };
     }
-    // Un servicio de reenvío puede devolver su propia página de error en lugar del CSS
-    if (/^\s*(<!doctype|<html)/i.test(res.text)) return { ok: false, css: "" };
+    // Un servicio de reenvío puede devolver su propia página o JSON de error en lugar del CSS
+    const head = res.text.trim();
+    if (/^(<!doctype|<html)/i.test(head)) return { ok: false, css: "" };
+    if (head.length < 1200 && /^[[{]/.test(head) && /"?(error|message)"?\s*[:=]/i.test(head) && /api[\s_-]?key|required|invalid|quota|rate.?limit|forbidden|unauthor|blocked|get one at/i.test(head))
+      return { ok: false, css: "" };
     let css = rewriteCssUrls(res.text, res.finalUrl).replace(/@import\s+(['"])([^'"]+)\1/gi, (_m, q: string, u: string) => `@import ${q}${absolutize(u, res.finalUrl)}${q}`);
     if (depth < MAX_IMPORT_DEPTH) {
       const imports = [...css.matchAll(/@import\s+(?:url\()?\s*['"]?([^'")\s;]+)['"]?\s*\)?([^;]*);/gi)];

@@ -20,28 +20,30 @@ interface Relay {
   binary?: boolean;
 }
 
+const alloriginsJson = (d: unknown) => {
+  const o = d as { contents?: string; status?: { http_code?: number; content_type?: string } };
+  return typeof o?.contents === "string" ? { status: o.status?.http_code ?? 200, contentType: o.status?.content_type ?? "", text: o.contents } : null;
+};
+
 export const RELAYS: Relay[] = [
   { name: "allorigins", url: (t) => `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`, binary: true },
   { name: "codetabs", url: (t) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(t)}`, binary: true },
-  { name: "corsproxy", url: (t) => `https://corsproxy.io/?url=${encodeURIComponent(t)}`, binary: true },
+  { name: "allorigins-json", url: (t) => `https://api.allorigins.win/get?url=${encodeURIComponent(t)}`, json: alloriginsJson },
+  { name: "thingproxy", url: (t) => `https://thingproxy.freeboard.io/fetch/${t}`, binary: true },
+  { name: "whateverorigin", url: (t) => `https://whateverorigin.org/get?url=${encodeURIComponent(t)}`, json: alloriginsJson },
   { name: "cors.lol", url: (t) => `https://api.cors.lol/?url=${encodeURIComponent(t)}`, binary: true },
-  {
-    name: "allorigins-json",
-    url: (t) => `https://api.allorigins.win/get?url=${encodeURIComponent(t)}`,
-    json: (d) => {
-      const o = d as { contents?: string; status?: { http_code?: number; content_type?: string } };
-      return typeof o?.contents === "string" ? { status: o.status?.http_code ?? 200, contentType: o.status?.content_type ?? "", text: o.contents } : null;
-    },
-  },
-  {
-    name: "whateverorigin",
-    url: (t) => `https://whateverorigin.org/get?url=${encodeURIComponent(t)}`,
-    json: (d) => {
-      const o = d as { contents?: string; status?: { http_code?: number; content_type?: string } };
-      return typeof o?.contents === "string" ? { status: o.status?.http_code ?? 200, contentType: o.status?.content_type ?? "", text: o.contents } : null;
-    },
-  },
 ];
+
+/** Respuesta de error del propio servicio de reenvío (p. ej. «se necesita clave»), no la web pedida. */
+export function looksLikeServiceError(text: string): boolean {
+  const t = text.trim();
+  return (
+    t.length < 1200 &&
+    /^[[{]/.test(t) &&
+    /"?(error|message|detail)"?\s*[:=]/i.test(t) &&
+    /api[\s_-]?key|required|invalid|quota|rate.?limit|forbidden|unauthor|not allowed|blocked|sign\s?up|get one at|too many/i.test(t)
+  );
+}
 
 /** Tiempo que se espera a un servicio antes de lanzar también el siguiente */
 const STAGGER_MS = 2500;
@@ -106,6 +108,7 @@ function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
 /** ¿Parece la respuesta de verdad y no una página de error del propio servicio? */
 function plausible(accept: string, target: string, text: string): boolean {
   if (!text.trim()) return false;
+  if (looksLikeServiceError(text)) return false; // error del propio servicio (clave requerida, límite, etc.)
   if (/text\/html/.test(accept)) {
     const head = text.slice(0, 30000);
     // Páginas de bloqueo o de límite de peticiones (Cloudflare, captchas, el propio servicio)
@@ -130,9 +133,9 @@ async function fetchThrough(relay: Relay, target: string, accept: string, timeou
     out = { status: res.status, contentType: res.headers.get("content-type") ?? "", text: await res.text() };
   }
   if (out.text.length > maxBytes) throw new Error("El recurso es demasiado grande.");
-  // Los servicios responden 5xx o 403 cuando no pueden (o no quieren) descargar la web
-  if (out.status >= 500 || out.status === 403 || out.status === 429) throw new Error(`HTTP ${out.status}`);
-  if (out.status < 400 && !plausible(accept, target, out.text)) throw new Error(`respuesta no válida de ${relay.name}`);
+  // Cualquier error (403 clave, 404 no encontrado, 429 límite, 5xx) significa que ese servicio no sirve: se prueba otro
+  if (out.status >= 400) throw new Error(`HTTP ${out.status}`);
+  if (!plausible(accept, target, out.text)) throw new Error(`respuesta no válida de ${relay.name}`);
   return out;
 }
 
