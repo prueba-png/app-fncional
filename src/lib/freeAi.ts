@@ -19,12 +19,54 @@ import {
 
 const MAX_FILE_CHARS = 400_000;
 
-/** Del mejor al más ligero: si uno no existe o agotó su cupo diario, se prueba el siguiente */
+/**
+ * Lista de reserva por si no se puede consultar el catálogo. Los alias «-latest» apuntan siempre
+ * al modelo actual, así que no hay que actualizarlos cuando Google saca versiones nuevas.
+ */
 export const GEMINI_MODELS = [
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
   "gemini-3-flash-preview",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
 ];
+
+/** Modelos descubiertos por clave (se consulta una vez por sesión). */
+const geminiModelCache = new Map<string, string[]>();
+
+/** Puntúa un modelo flash para elegir el más nuevo y capaz primero. */
+function scoreGeminiModel(id: string): number {
+  const ver = parseFloat(id.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? "0");
+  const latest = /-latest$/.test(id) ? 1 : 0; // los alias «latest» no caducan
+  const full = /lite/i.test(id) ? 0 : 1; // «flash» algo mejor que «flash-lite»
+  const stable = /preview|exp|thinking/i.test(id) ? 0 : 1;
+  return ver * 100 + latest * 20 + full * 5 + stable;
+}
+
+/**
+ * Pregunta a Google qué modelos puede usar esta clave y elige los «flash» (los del plan gratuito),
+ * del más nuevo al más ligero. Así la app usa siempre los últimos modelos sin tener que actualizarse.
+ */
+async function discoverGeminiModels(apiKey: string): Promise<string[]> {
+  const cached = geminiModelCache.get(apiKey);
+  if (cached) return cached;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> };
+    const ids = (data.models ?? [])
+      .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((m) => (m.name ?? "").replace(/^models\//, ""))
+      .filter((id) => /flash/i.test(id) && !/(embedding|aqa|imagen|image-generation|-tts|-vision|learnlm|gemma)/i.test(id));
+    // Prioriza modelos «flash» normales; añade también algún «pro» como último recurso si no hubiera flash
+    const flash = ids.sort((a, b) => scoreGeminiModel(b) - scoreGeminiModel(a));
+    const list = flash.length ? [...new Set(flash)] : GEMINI_MODELS;
+    geminiModelCache.set(apiKey, list);
+    return list;
+  } catch {
+    return GEMINI_MODELS;
+  }
+}
 
 type Emit = (e: ChatStreamEvent) => void;
 
@@ -189,8 +231,8 @@ async function geminiError(res: Response): Promise<ProviderError> {
     );
   if (
     res.status === 404 ||
-    (res.status === 400 &&
-      /not found|not supported|is not available/i.test(message))
+    ((res.status === 400 || res.status === 403) &&
+      /not found|not supported|no longer available|not available|unavailable|deprecat|update your code|no longer supported/i.test(message))
   )
     return new ProviderError(
       `Modelo no disponible: ${message}`,
@@ -330,8 +372,10 @@ export async function streamGemini(
     throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
   let lastLimit = false;
   let last: unknown;
+  // Se usan los modelos que la propia cuenta tiene disponibles (siempre los últimos), no una lista fija
+  const models = await discoverGeminiModels(req.apiKey);
   // Si todos los modelos agotaron su cupo hace poco, no se reintentan: se avisa ya para saltar a otra IA
-  const rested = GEMINI_MODELS.filter((m) => (exhaustedUntil.get(m) ?? 0) < Date.now());
+  const rested = models.filter((m) => (exhaustedUntil.get(m) ?? 0) < Date.now()).slice(0, 5);
   if (!rested.length)
     throw quotaError(
       "El cupo gratuito de Google está agotado por ahora (se renueva solo). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
