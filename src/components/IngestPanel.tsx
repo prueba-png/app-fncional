@@ -7,6 +7,7 @@ import type { AssetRef } from "../../shared/types";
 import { formatBytes } from "../lib/util";
 import { Icon } from "./Icon";
 import { ServerNotice } from "./ServerNotice";
+import { analyzeProject } from "../../shared/analysis";
 
 function Report({ r }: { r: IngestReport }) {
   const { toast, setTab } = useStudio.getState();
@@ -37,9 +38,13 @@ function Report({ r }: { r: IngestReport }) {
           <Icon name="globe" />
           <div className="grow">
             <div style={{ fontWeight: 600 }}>{r.title || "(sin título)"}</div>
-            <a className="small mono" href={r.finalUrl} target="_blank" rel="noreferrer noopener">
-              {r.finalUrl}
-            </a>
+            {/^https?:\/\//i.test(r.finalUrl) ? (
+              <a className="small mono" href={r.finalUrl} target="_blank" rel="noreferrer noopener">
+                {r.finalUrl}
+              </a>
+            ) : (
+              <span className="small mono muted">{r.finalUrl}</span>
+            )}
           </div>
         </div>
         {r.description && <p className="small muted" style={{ marginBottom: 0 }}>{r.description}</p>}
@@ -252,6 +257,20 @@ export function IngestPanel() {
   const [target, setTarget] = useState<"new" | "current">("new");
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const hasServer = useStudio((s) => Boolean(s.health));
+
+  /** Analiza los ficheros del proyecto actual en el navegador (no necesita servidor) */
+  const analyzeCurrent = () => {
+    if (!project) return;
+    try {
+      const report = analyzeProject(project.files, project.origin.detail || project.name);
+      useStudio.getState().patchProject({ ingest: report });
+      const errors = report.a11y.filter((i) => i.severity === "error").length;
+      toast(`Proyecto analizado: ${report.dom.totalElements} elementos, ${errors} problema(s) de accesibilidad`, "success");
+    } catch (err) {
+      toast(`No se pudo analizar: ${(err as Error).message}`, "error");
+    }
+  };
 
   const run = async () => {
     if (!url.trim()) return;
@@ -287,7 +306,16 @@ export function IngestPanel() {
 
   return (
     <div className="tool-body">
-      <ServerNotice feature="el análisis detallado de URLs" />
+      <div className="card" style={{ marginBottom: 12, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 600 }}>Analizar el proyecto actual</div>
+        <div className="small muted">Auditoría de accesibilidad, colores, tipografía, estructura y recursos del código que tienes abierto.</div>
+        <button className="btn primary" style={{ justifyContent: "center" }} onClick={analyzeCurrent} disabled={!project}>
+          <Icon name="eye" /> Analizar este proyecto
+        </button>
+      </div>
+      {!hasServer && <ServerNotice feature="la descarga y el análisis de una URL" />}
+      {hasServer && (
+      <>
       <div className="field">
         <span>URL pública a analizar</span>
         <div className="row">
@@ -331,12 +359,14 @@ export function IngestPanel() {
         se eliminan por defecto y la vista previa se ejecuta aislada. Analiza solo páginas que tengas derecho a estudiar y respeta los
         derechos de autor y términos de uso del sitio.
       </div>
+      </>
+      )}
       {loading && (
         <div className="row muted" style={{ marginTop: 12 }}>
           <span className="spinner" /> Descargando y analizando…
         </div>
       )}
-      {project?.ingest ? <Report r={project.ingest} /> : !loading && <div className="empty">El proyecto actual no procede de un análisis de URL.</div>}
+      {project?.ingest ? <Report r={project.ingest} /> : !loading && <div className="empty">Pulsa «Analizar este proyecto» para ver el informe.</div>}
     </div>
   );
 }

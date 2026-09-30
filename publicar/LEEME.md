@@ -2,7 +2,11 @@
 
 `index.html` contiene la aplicación completa (interfaz, estilos y código). No necesita servidor ni instalación.
 
-## Cómo publicarla
+## Enlace publicado
+
+https://prueba-png.github.io/app-fncional/ (rama `gh-pages`, publicada con GitHub Pages).
+
+## Cómo publicarla en otro sitio
 
 Sube `index.html` a cualquier alojamiento de páginas estáticas, por ejemplo:
 
@@ -19,6 +23,6 @@ También puedes abrirla directamente en el navegador del ordenador (doble clic).
 ## Diferencias con la versión con servidor
 
 - Clonar por enlace lo hace la IA leyendo la web: la estructura y los textos son fieles y el diseño es aproximado. Para más exactitud, sube también una captura.
-- El «Análisis» detallado del modo avanzado (auditoría DOM/CSS) necesita el servidor (`npm run dev`).
+- En el modo avanzado, «Análisis» funciona sobre el proyecto abierto; descargar y analizar una URL directamente necesita el servidor (`npm run dev`).
 
 Se regenera con `npm run build:standalone`.

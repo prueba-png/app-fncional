@@ -252,6 +252,11 @@ details.block > div { padding: 0 10px 10px; }
   .dialog-body .row { flex-wrap: wrap; }
   .topbar .mode-toggle { margin-left: auto; }
 }
+@media (max-width: 480px) {
+  /* En móvil el nombre del proyecto ya aparece en la pestaña de ficheros y en el modo fácil */
+  .topbar .project-name { display: none; }
+  .mode-toggle button { padding: 4px 8px; }
+}
 
 /* ── Selector de modo y logo ────────────────────────────── */
 button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; font-weight: 700; }

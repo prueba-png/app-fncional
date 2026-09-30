@@ -4,10 +4,12 @@
  * réplica estática de estudio (index.html + styles.css + script.js).
  */
 import * as cheerio from "cheerio";
-import type { AnyNode, Element } from "domhandler";
-import type { A11yIssue, AssetRef, DomStats, FileMap, IngestOptions, IngestResult, OutlineNode } from "../../shared/types";
+import type { Element } from "domhandler";
+import type { AssetRef, FileMap, IngestOptions, IngestResult } from "../../shared/types";
 import { detectDependencies } from "../../shared/dependencies";
-import { analyzeCss } from "./cssAnalyzer";
+import { analyzeCss, assetKind, auditAccessibility, computeDomStats, detectClientRendered, extractOutline } from "../../shared/analysis";
+
+export { detectClientRendered } from "../../shared/analysis";
 import { decodeBody, safeFetch } from "./safeFetch";
 
 const MAX_STYLESHEETS = 15;
@@ -38,148 +40,6 @@ function rewriteSrcset(srcset: string, base: string): string {
 /** Reescribe url(...) relativos dentro de CSS a absolutos respecto a `base`. */
 export function rewriteCssUrls(css: string, base: string): string {
   return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (_m, q: string, u: string) => `url(${q}${absolutize(u, base)}${q})`);
-}
-
-function snippet($: cheerio.CheerioAPI, el: AnyNode): string {
-  const html = $.html(el) ?? "";
-  return html.length > 160 ? html.slice(0, 157) + "..." : html;
-}
-
-function accessibleText($: cheerio.CheerioAPI, el: Element): string {
-  const $el = $(el);
-  return (
-    $el.attr("aria-label") ||
-    $el.attr("aria-labelledby") ||
-    $el.attr("title") ||
-    $el.text().trim() ||
-    $el.find("img[alt]").attr("alt") ||
-    $el.find("svg title").text() ||
-    ""
-  ).trim();
-}
-
-function auditAccessibility($: cheerio.CheerioAPI): A11yIssue[] {
-  const issues: A11yIssue[] = [];
-  const push = (i: A11yIssue) => issues.length < 300 && issues.push(i);
-
-  if (!$("html").attr("lang")) push({ severity: "error", rule: "html-lang", message: "El elemento <html> no declara el atributo lang." });
-  if (!$("title").first().text().trim()) push({ severity: "error", rule: "document-title", message: "El documento no tiene <title>." });
-
-  const viewport = $('meta[name="viewport"]').attr("content");
-  if (!viewport) push({ severity: "warning", rule: "meta-viewport", message: "Falta <meta name=\"viewport\">: la página no será responsive en móviles." });
-  else if (/user-scalable\s*=\s*no|maximum-scale\s*=\s*1(?:\.0)?\b/i.test(viewport))
-    push({ severity: "error", rule: "meta-viewport-zoom", message: "El viewport impide el zoom del usuario (user-scalable=no / maximum-scale=1)." });
-
-  $("img").each((_, el) => {
-    if ($(el).attr("alt") === undefined && $(el).attr("role") !== "presentation")
-      push({ severity: "error", rule: "image-alt", message: "Imagen sin atributo alt.", snippet: snippet($, el) });
-  });
-
-  $("input, select, textarea").each((_, el) => {
-    const $el = $(el);
-    const type = ($el.attr("type") ?? "").toLowerCase();
-    if (["hidden", "submit", "button", "reset", "image"].includes(type)) return;
-    const id = $el.attr("id");
-    const labelled =
-      $el.attr("aria-label") || $el.attr("aria-labelledby") || $el.attr("title") || $el.closest("label").length > 0 ||
-      (id && $(`label[for="${id.replace(/"/g, '\\"')}"]`).length > 0);
-    if (!labelled) push({ severity: "error", rule: "form-label", message: "Control de formulario sin etiqueta accesible.", snippet: snippet($, el) });
-    else if (!$el.attr("aria-label") && !id && $el.attr("placeholder") && !$el.closest("label").length)
-      push({ severity: "info", rule: "placeholder-label", message: "El placeholder no sustituye a una etiqueta.", snippet: snippet($, el) });
-  });
-
-  $("button, a[href], [role=button]").each((_, el) => {
-    if (!accessibleText($, el as Element))
-      push({ severity: "error", rule: "control-name", message: "Botón o enlace sin texto accesible.", snippet: snippet($, el) });
-  });
-
-  let last = 0;
-  const h1 = $("h1").length;
-  if (h1 === 0) push({ severity: "warning", rule: "page-has-heading-one", message: "La página no contiene ningún <h1>." });
-  if (h1 > 1) push({ severity: "info", rule: "multiple-h1", message: `La página contiene ${h1} elementos <h1>.` });
-  $("h1, h2, h3, h4, h5, h6").each((_, el) => {
-    const lvl = Number((el as Element).tagName.slice(1));
-    if (last && lvl > last + 1)
-      push({ severity: "warning", rule: "heading-order", message: `Salto de jerarquía de encabezados: h${last} → h${lvl}.`, snippet: snippet($, el) });
-    last = lvl;
-  });
-
-  if (!$("main, [role=main]").length) push({ severity: "warning", rule: "landmark-main", message: "No existe landmark <main>." });
-
-  $("[tabindex]").each((_, el) => {
-    if (Number($(el).attr("tabindex")) > 0)
-      push({ severity: "warning", rule: "tabindex", message: "tabindex positivo altera el orden natural de foco.", snippet: snippet($, el) });
-  });
-
-  const ids = new Map<string, number>();
-  $("[id]").each((_, el) => {
-    const id = $(el).attr("id")!;
-    ids.set(id, (ids.get(id) ?? 0) + 1);
-  });
-  for (const [id, n] of ids) if (n > 1) push({ severity: "warning", rule: "duplicate-id", message: `El id "${id}" está repetido ${n} veces.` });
-
-  return issues;
-}
-
-function computeDomStats($: cheerio.CheerioAPI): DomStats {
-  const freq = new Map<string, number>();
-  let total = 0;
-  let maxDepth = 0;
-  const walk = (node: AnyNode, depth: number) => {
-    if (node.type === "tag" || node.type === "script" || node.type === "style") {
-      const el = node as Element;
-      total++;
-      maxDepth = Math.max(maxDepth, depth);
-      freq.set(el.tagName, (freq.get(el.tagName) ?? 0) + 1);
-      for (const c of el.children) walk(c, depth + 1);
-    }
-  };
-  const root = $.root().get(0);
-  if (root) for (const c of (root as unknown as { children: AnyNode[] }).children) walk(c, 1);
-
-  const landmarkSelectors: Record<string, string> = {
-    banner: "header, [role=banner]",
-    navigation: "nav, [role=navigation]",
-    main: "main, [role=main]",
-    complementary: "aside, [role=complementary]",
-    contentinfo: "footer, [role=contentinfo]",
-    search: "search, [role=search]",
-    form: "form[aria-label], form[aria-labelledby], [role=form]",
-  };
-  return {
-    totalElements: total,
-    maxDepth,
-    tagFrequency: [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([tag, count]) => ({ tag, count })),
-    landmarks: Object.entries(landmarkSelectors).map(([role, sel]) => ({ role, count: $(sel).length })).filter((l) => l.count > 0),
-    forms: $("form").length,
-    inputs: $("input, select, textarea").length,
-    links: $("a[href]").length,
-    images: $("img, picture, svg").length,
-    scripts: $("script").length,
-    stylesheets: $('link[rel~="stylesheet"], style').length,
-    inlineStyles: $("[style]").length,
-  };
-}
-
-function extractOutline($: cheerio.CheerioAPI): OutlineNode[] {
-  const out: OutlineNode[] = [];
-  $("h1, h2, h3, h4, h5, h6").each((_, el) => {
-    const text = $(el).text().replace(/\s+/g, " ").trim();
-    if (text && out.length < 150) out.push({ level: Number((el as Element).tagName.slice(1)), text: text.slice(0, 140) });
-  });
-  return out;
-}
-
-function assetKind(url: string, hint?: AssetRef["kind"]): AssetRef["kind"] {
-  if (hint) return hint;
-  const p = url.split("?")[0].toLowerCase();
-  if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)$/.test(p)) return "image";
-  if (/\.(woff2?|ttf|otf|eot)$/.test(p)) return "font";
-  if (/\.(mp4|webm|ogg|mp3|wav)$/.test(p)) return "media";
-  if (p.endsWith(".css")) return "stylesheet";
-  if (/\.m?js$/.test(p)) return "script";
-  if (p.endsWith(".ico")) return "icon";
-  return "other";
 }
 
 async function fetchStylesheet(url: string, depth: number, warnings: string[], budget: { count: number; deadline: number }): Promise<string> {
@@ -375,19 +235,4 @@ export async function ingestUrl(opts: IngestOptions): Promise<IngestResult> {
     warnings,
     looksClientRendered,
   };
-}
-
-/** Heurística: la página depende de JavaScript para mostrar su contenido (React, Vue, Next…). */
-export function detectClientRendered($: cheerio.CheerioAPI): boolean {
-  const body = $("body").clone();
-  body.find("script, style, noscript, template, link, meta").remove();
-  const text = body.text().replace(/\s+/g, " ").trim();
-  const visible = body.find("img, svg, video, picture, canvas, input, button").length;
-  const hasScripts = $("script[src], script[type=module]").length > 0;
-  const emptyMount = ["#root", "#app", "#__next", "#__nuxt", "#svelte", "[data-reactroot]"].some((sel) => {
-    const el = $(sel);
-    return el.length > 0 && el.text().trim().length < 20 && el.children().length <= 1;
-  });
-  // Páginas pequeñas con un script de analítica no cuentan: hace falta un contenedor vacío o un cuerpo prácticamente sin contenido
-  return hasScripts && (emptyMount || (text.length < 40 && visible < 2));
 }
