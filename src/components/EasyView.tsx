@@ -23,6 +23,7 @@ export function EasyView() {
   return (
     <main className="easy" aria-live="polite">
       {stage === "start" && <StartScreen />}
+      {stage === "ask" && <AskScreen />}
       {stage === "working" && <WorkingScreen />}
       {stage === "result" && <ResultScreen />}
     </main>
@@ -97,7 +98,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
 
 /* ── Pantalla de inicio ────────────────────────────────────────── */
 function StartScreen() {
-  const { cloneUrl, cloneFiles, openResult } = useEasy.getState();
+  const { askUrl, askFiles, openResult } = useEasy.getState();
   const projects = useStudio((s) => s.projects);
   const health = useStudio((s) => s.health);
   const ai = useStudio((s) => s.ai);
@@ -112,7 +113,7 @@ function StartScreen() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const startUrl = (value = url) => {
-    if (normalizeUrl(value)) void cloneUrl(value);
+    if (normalizeUrl(value)) askUrl(value);
     else useStudio.getState().toast("Escribe una dirección web, por ejemplo «ejemplo.com».", "error");
   };
 
@@ -127,7 +128,7 @@ function StartScreen() {
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        if (e.dataTransfer.files.length) void cloneFiles(Array.from(e.dataTransfer.files));
+        if (e.dataTransfer.files.length) askFiles(Array.from(e.dataTransfer.files));
       }}
     >
       <header className="easy-hero">
@@ -206,7 +207,7 @@ function StartScreen() {
             multiple
             accept={ACCEPT}
             onChange={(e) => {
-              if (e.target.files?.length) void cloneFiles(Array.from(e.target.files));
+              if (e.target.files?.length) askFiles(Array.from(e.target.files));
               e.target.value = "";
             }}
           />
@@ -292,6 +293,92 @@ function useElapsed(active: boolean): number {
 
 function formatElapsed(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/* ── Paso intermedio: «¿Qué quieres que haga?» ─────────────────── */
+function AskScreen() {
+  const pending = useEasy((s) => s.pending);
+  const { startPending, cancelAsk, askFiles } = useEasy.getState();
+  const [instruction, setInstruction] = useState("");
+  const moreRef = useRef<HTMLInputElement>(null);
+  if (!pending) return null;
+
+  const isFiles = pending.kind === "files";
+  const examples = isFiles
+    ? [
+        "Clónalo tal cual, igual que la imagen",
+        "Junta las dos imágenes en la misma página, una debajo de otra",
+        "Muestra la primera imagen 2 segundos, haz un splash y luego la segunda",
+      ]
+    : ["Clónala tal cual", "Clónala y pon el menú en español", "Clónala pero cambia los colores a tonos azules"];
+
+  return (
+    <div className="easy-start ask-screen">
+      <header className="easy-hero">
+        <h1>¿Qué quieres que haga?</h1>
+        <p className="muted">
+          {isFiles ? `Con ${pending.label}. ` : `Con ${pending.label}. `}
+          Escribe lo que quieres (o déjalo vacío para clonarlo tal cual) y pulsa «Crear».
+        </p>
+      </header>
+
+      {isFiles && pending.previews.length > 0 && (
+        <div className="ask-previews">
+          {pending.previews.map((src, i) => (
+            <div key={i} className="ask-thumb">
+              <img src={src} alt={`Adjunto ${i + 1}`} />
+              <span>{i + 1}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <textarea
+        className="textarea ask-instruction"
+        placeholder={isFiles ? "Ej.: junta estas dos capturas; muestra la primera 2 s y luego la segunda con un splash" : "Ej.: clónala tal cual, o dime qué cambiar"}
+        value={instruction}
+        onChange={(e) => setInstruction(e.target.value)}
+        autoFocus
+        aria-label="Qué quieres que haga la IA"
+      />
+
+      <div className="ask-examples">
+        {examples.map((ex) => (
+          <button key={ex} className="suggestion" onClick={() => setInstruction(ex)}>
+            {ex}
+          </button>
+        ))}
+      </div>
+
+      <div className="row wrap" style={{ justifyContent: "center", gap: 8 }}>
+        <button className="btn" onClick={cancelAsk}>
+          <Icon name="x" size={14} /> Cancelar
+        </button>
+        {isFiles && (
+          <>
+            <input
+              ref={moreRef}
+              type="file"
+              accept="image/*,video/*,application/pdf,.svg"
+              multiple
+              hidden
+              onChange={(e) => {
+                const add = Array.from(e.target.files ?? []);
+                if (add.length) askFiles([...pending.files, ...add]);
+                e.target.value = "";
+              }}
+            />
+            <button className="btn" onClick={() => moreRef.current?.click()}>
+              <Icon name="plus" size={14} /> Añadir otra imagen
+            </button>
+          </>
+        )}
+        <button className="btn primary" onClick={() => void startPending(instruction)}>
+          <Icon name="bolt" size={14} /> Crear
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /* ── Pantalla de progreso ──────────────────────────────────────── */

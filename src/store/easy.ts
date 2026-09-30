@@ -18,7 +18,10 @@ import { useChat } from "./chat";
 import { aiAvailable, needsApiKey, useStudio } from "./studio";
 
 export type Mode = "easy" | "advanced";
-export type Stage = "start" | "working" | "result";
+export type Stage = "start" | "ask" | "working" | "result";
+
+/** Entrada pendiente de confirmar: se muestra la pantalla «¿Qué quieres que haga?» antes de crear */
+export type PendingInput = { kind: "url"; url: string; label: string } | { kind: "files"; files: File[]; label: string; previews: string[] };
 export type StepState = "pending" | "active" | "done" | "error";
 
 export interface Step {
@@ -57,8 +60,14 @@ interface EasyState {
   setMode(mode: Mode): void;
   goHome(): void;
   openResult(projectId: string): Promise<void>;
-  cloneUrl(url: string): Promise<void>;
-  cloneFiles(files: File[]): Promise<void>;
+  /** Entrada pendiente y pantalla de instrucciones antes de crear */
+  pending: PendingInput | null;
+  askFiles(files: File[]): void;
+  askUrl(url: string): void;
+  startPending(instruction: string): Promise<void>;
+  cancelAsk(): void;
+  cloneUrl(url: string, instruction?: string): Promise<void>;
+  cloneFiles(files: File[], instruction?: string): Promise<void>;
   /** Plan B cuando la vista no puede enviar imágenes: clona a partir de una descripción escrita */
   cloneFromDescription(description: string): Promise<void>;
   retry(): Promise<void>;
@@ -81,7 +90,7 @@ const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
 const MAX_DOC_CHARS = 60_000;
 
 let abortController: AbortController | null = null;
-let lastInput: { kind: "url"; url: string } | { kind: "files"; files: File[] } | null = null;
+let lastInput: { kind: "url"; url: string; instruction?: string } | { kind: "files"; files: File[]; instruction?: string } | null = null;
 /** Referencias ya procesadas a la espera de la descripción del usuario (plan B) */
 let pendingDescribe: { projectId: string; refs: db.VisualReference[]; extra: ChatAttachment[]; labels: string[] } | null = null;
 
@@ -301,6 +310,37 @@ export const useEasy = create<EasyState>((set, get) => {
     stage: "start",
     job: null,
     notes: {},
+    pending: null,
+
+    askFiles(files) {
+      if (!files.length) return;
+      const previews = files.filter((f) => f.type.startsWith("image/")).slice(0, 6).map((f) => URL.createObjectURL(f));
+      const label = files.length === 1 ? files[0].name : `${files.length} archivos`;
+      set({ stage: "ask", pending: { kind: "files", files, label, previews } });
+    },
+
+    askUrl(raw) {
+      const url = normalizeUrl(raw);
+      if (!url) {
+        useStudio.getState().toast("Esa dirección no parece válida. Prueba algo como «ejemplo.com».", "error");
+        return;
+      }
+      set({ stage: "ask", pending: { kind: "url", url: raw.trim(), label: new URL(url).hostname } });
+    },
+
+    async startPending(instruction) {
+      const p = get().pending;
+      if (!p) return;
+      set({ pending: null });
+      if (p.kind === "files") await get().cloneFiles(p.files, instruction.trim() || undefined);
+      else await get().cloneUrl(p.url, instruction.trim() || undefined);
+    },
+
+    cancelAsk() {
+      const p = get().pending;
+      if (p?.kind === "files") p.previews.forEach((u) => URL.revokeObjectURL(u));
+      set({ stage: "start", pending: null });
+    },
 
     setMode(mode) {
       try {
@@ -330,11 +370,11 @@ export const useEasy = create<EasyState>((set, get) => {
     async retry() {
       const input = lastInput;
       if (!input) return;
-      if (input.kind === "url") await get().cloneUrl(input.url);
-      else await get().cloneFiles(input.files);
+      if (input.kind === "url") await get().cloneUrl(input.url, input.instruction);
+      else await get().cloneFiles(input.files, input.instruction);
     },
 
-    async cloneUrl(raw) {
+    async cloneUrl(raw, instruction) {
       const url = normalizeUrl(raw);
       if (!url) {
         useStudio.getState().toast("Esa dirección no parece válida. Prueba algo como «ejemplo.com».", "error");
@@ -342,7 +382,7 @@ export const useEasy = create<EasyState>((set, get) => {
       }
       // Se envía tal cual la escribió el usuario: sin protocolo, el servidor prueba HTTPS y luego HTTP
       const typed = raw.trim();
-      lastInput = { kind: "url", url: typed };
+      lastInput = { kind: "url", url: typed, instruction };
       abortController = new AbortController();
       const signal = abortController.signal;
       const host = new URL(url).hostname;
@@ -428,6 +468,12 @@ export const useEasy = create<EasyState>((set, get) => {
         useStudio.getState().setAutoInjectDeps(false);
         if (result.warnings.length && !note) note = "Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto.";
         abortController = null;
+        // Si diste una instrucción («júntalo con…», «cambia…»), se aplica sobre el clon descargado
+        if (instruction && aiAvailable(useStudio.getState())) {
+          finish(note);
+          await useChat.getState().send(instruction);
+          return;
+        }
         finish(note);
         return;
       } catch (err) {
@@ -487,7 +533,7 @@ export const useEasy = create<EasyState>((set, get) => {
         }
         await runAi(
           `Clona ${url} con la máxima fidelidad, como una copia píxel a píxel.
-${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (estructura, medidas, colores, tipografía, imágenes) siguiendo las reglas de referencia visual.\n" : ""}- Usa la herramienta web_fetch para leer ${url} y copiar literalmente sus textos, enlaces y navegación.
+${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : ""}${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (estructura, medidas, colores, tipografía, imágenes) siguiendo las reglas de referencia visual.\n" : ""}- Usa la herramienta web_fetch para leer ${url} y copiar literalmente sus textos, enlaces y navegación.
 - Usa las imágenes de la página por su URL absoluta cuando aparezcan${ref ? " o recórtalas de la captura con captura:<id>#x,y,ancho,alto" : ""}.
 - Crea una página completa: index.html, styles.css y script.js, responsive.
 - Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,
@@ -506,9 +552,9 @@ ${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (e
       }
     },
 
-    async cloneFiles(files) {
+    async cloneFiles(files, instruction) {
       if (!files.length) return;
-      lastInput = { kind: "files", files };
+      lastInput = { kind: "files", files, instruction };
       pendingDescribe = null;
       const studio = useStudio.getState();
       const zips = files.filter((f) => /\.zip$/i.test(f.name) || f.type === "application/zip");
@@ -639,8 +685,17 @@ ${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (e
         }
 
         const target = refs.find((r) => (r.kind === "image" || r.kind === "video") && r.frames.length && r.width && r.height);
-        const refine = get().precision === "exact" && target ? () => refineAgainst(target) : undefined;
-        await runAi(CLONE_PROMPT, all, labels, { refine });
+        // Con instrucción (componer varias imágenes, secuencia, splash…) manda lo que pide el usuario y no se compara contra una sola captura
+        const prompt = instruction
+          ? `INSTRUCCIÓN DEL USUARIO (haz exactamente esto con los archivos adjuntos): ${instruction}
+
+Como apoyo, estas son las reglas de fidelidad cuando reproduzcas una captura:
+${CLONE_PROMPT}
+
+Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiempos o transiciones (por ejemplo un splash), impleméntalo con HTML/CSS/JS y usa las imágenes reales recortándolas de las capturas (captura:<id>#x,y,ancho,alto) o mostrándolas completas según convenga.`
+          : CLONE_PROMPT;
+        const refine = !instruction && get().precision === "exact" && target ? () => refineAgainst(target) : undefined;
+        await runAi(prompt, all, labels, { refine });
       } catch (err) {
         fail(friendlyAiError((err as Error).message));
       }
