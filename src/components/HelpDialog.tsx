@@ -12,6 +12,7 @@ const EASY: Entry[] = [
   { icon: "globe", name: "Clonar (enlace)", what: "Pega la dirección de una web y pulsa Clonar. Se copia su código real (textos, estilos e imágenes)." },
   { icon: "upload", name: "Sube o arrastra aquí", what: "Elige una captura, un vídeo, un PDF o un SVG y la IA crea la página igual. Los HTML y ZIP se abren tal cual." },
   { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones»." },
+  { icon: "external", name: "Publicar", what: "Envuelve todo el proyecto en un solo archivo HTML y te deja copiarlo o descargarlo para subirlo a Netlify, GitHub Pages, etc." },
   { icon: "download", name: "Descargar", what: "Guarda el código del clon en tu dispositivo como archivo ZIP." },
   { icon: "database", name: "Datos", what: "Conecta el proyecto con tu bot de Telegram: lo que la gente envíe en los formularios te llega al chat. También puedes escribir «conecta este proyecto con la base de datos de Telegram» con el token y el ID." },
   { icon: "cloud", name: "Telegram", what: "Envía una copia de seguridad del clon a tu chat de Telegram (se configura en Ajustes)." },
@@ -19,7 +20,8 @@ const EASY: Entry[] = [
   { icon: "monitor", name: "Ordenador / tablet / móvil", what: "Muestra el clon tal como se ve en esa pantalla. Si no cabe, se reduce para que lo veas entero (el % indica el tamaño)." },
   { icon: "expand", name: "Pantalla completa", what: "Amplía la vista previa a toda la pantalla. Pulsa «Salir» (o Esc) para volver." },
   { icon: "refresh", name: "Recargar", what: "Vuelve a cargar la vista previa desde cero." },
-  { icon: "send", name: "Aplicar", what: "Escribe con tus palabras qué quieres cambiar (por ejemplo «pon el botón en verde») y la IA lo hace." },
+  { icon: "send", name: "Aplicar", what: "Escribe qué quieres cambiar (por ejemplo «pon el botón en verde», o «usa el mismo logo de la captura»: la IA recuerda las capturas originales) y la IA lo hace." },
+  { icon: "image", name: "Añadir imagen", what: "En el cuadro de cambios, adjunta más imágenes al proyecto (por ejemplo «muestra primero esta y luego esta otra»)." },
   { icon: "history", name: "Deshacer", what: "Devuelve el clon a como estaba antes del último cambio." },
 ];
 

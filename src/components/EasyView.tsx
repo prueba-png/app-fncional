@@ -14,6 +14,7 @@ import { MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/referenc
 import * as db from "../db/db";
 import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
+import { ExportDialog } from "./ExportDialog";
 import { Icon } from "./Icon";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
@@ -486,6 +487,7 @@ function ResultScreen() {
   const [change, setChange] = useState("");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
   const [showKey, setShowKey] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [extraImages, setExtraImages] = useState<File[]>([]);
   const [preparing, setPreparing] = useState(false);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -594,7 +596,10 @@ function ResultScreen() {
           {project.origin.detail && <span className="muted small">{project.origin.detail}</span>}
         </div>
         <div className="result-actions">
-          <button className="btn" aria-label="Descargar" onClick={() => void download()} disabled={busy === "zip" || !canDownload} title={canDownload ? "Descargar el código" : "Esta vista no permite descargar ficheros"}>
+          <button className="btn" aria-label="Publicar" onClick={() => setExportOpen(true)} title="Copiar todo el código en un solo HTML para subirlo a Netlify u otro sitio">
+            <Icon name="external" /> <span className="label">Publicar</span>
+          </button>
+          <button className="btn" aria-label="Descargar" onClick={() => void download()} disabled={busy === "zip" || !canDownload} title={canDownload ? "Descargar el código (ZIP)" : "Esta vista no permite descargar ficheros"}>
             {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} <span className="label">Descargar</span>
           </button>
           <button
@@ -715,6 +720,7 @@ function ResultScreen() {
           )}
         </div>
       </div>
+      <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );
 }

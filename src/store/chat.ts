@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { hasCaptureRefs, resolveCrops } from "../lib/crops";
+import { memoryAttachments, refersToOriginal } from "../lib/references";
 import type { ChatAttachment, ChatTurn } from "../../shared/types";
 import { parseFileBlocks } from "../../shared/fileBlocks";
 import * as db from "../db/db";
@@ -81,6 +82,19 @@ export const useChat = create<ChatState>((set, get) => ({
       return;
     }
 
+    // Memoria de las capturas originales: si el usuario menciona la captura/logo/imagen original y no adjunta
+    // nada nuevo, se le vuelven a enviar a la IA las capturas con las que se creó el proyecto para que las consulte.
+    let attachments = opts.attachments;
+    if (!attachments?.length && refersToOriginal(prompt)) {
+      try {
+        const refs = await db.listReferences(project.id);
+        const mem = memoryAttachments(refs);
+        if (mem.length) attachments = mem;
+      } catch {
+        /* sin referencias guardadas */
+      }
+    }
+
     const userMsg: ChatMessage = {
       id: uid("m_"),
       projectId: project.id,
@@ -116,7 +130,7 @@ export const useChat = create<ChatState>((set, get) => ({
             prompt: userMsg.content,
             files: useStudio.getState().project!.files,
             activeFile: project.activeFile,
-            attachments: opts.attachments,
+            attachments,
             mode: opts.mode ?? "edit",
           },
           (t) => {
@@ -137,7 +151,7 @@ export const useChat = create<ChatState>((set, get) => ({
           prompt: userMsg.content,
           files: useStudio.getState().project!.files,
           activeFile: project.activeFile,
-          attachments: opts.attachments,
+          attachments,
           mode: opts.mode ?? "edit",
           webFetch: opts.webFetch,
         },

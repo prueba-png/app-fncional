@@ -76,6 +76,11 @@ export function findEntry(files: FileMap): string | null {
   return Object.keys(files).find((p) => /\.html?$/i.test(p)) ?? null;
 }
 
+/** HTML autocontenido del proyecto (todo en un solo fichero) para alojarlo en Netlify, GitHub Pages, etc. */
+export function buildStandaloneHtml(files: FileMap, page?: string): string {
+  return buildPreviewDocument(files, { page, bridge: false, autoInjectDeps: true });
+}
+
 export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): string {
   const { autoInjectDeps = true, bridge = true } = opts;
   const page = opts.page && opts.page in files ? opts.page : findEntry(files);

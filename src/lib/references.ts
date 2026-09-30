@@ -51,3 +51,31 @@ export function referencesToAttachments(refs: VisualReference[]): { attachments:
 export function countImages(attachments: ChatAttachment[]): number {
   return attachments.filter((a) => a.type === "image").length;
 }
+
+/** Palabras que indican que el usuario se refiere a la(s) captura(s) originales del proyecto. */
+const MEMORY_RE = /captur|foto|imagen|im[aá]genes|logo|logotipo|icono|banner|cabecera|original|mand[eé]|envi[eé]|la que te|referenci|mism[oa]s?\s+(logo|imagen|foto|color|icono|banner)/i;
+export function refersToOriginal(text: string): boolean {
+  return MEMORY_RE.test(text);
+}
+
+/**
+ * Versión ligera (1 imagen por referencia) para que la IA «recuerde» las capturas originales al editar,
+ * sin reenviar todos los trozos. Incluye cómo recortar de ellas (logo, foto, icono) con captura:<id>#…
+ */
+export function memoryAttachments(refs: VisualReference[]): ChatAttachment[] {
+  const out: ChatAttachment[] = [];
+  for (const r of refs.slice(0, 6)) {
+    const frame = r.full ?? r.frames[0];
+    if (!frame) continue;
+    const { mediaType, data } = dataUrlParts(frame);
+    const w = r.fullWidth ?? r.width ?? 0;
+    const h = r.fullHeight ?? r.height ?? 0;
+    out.push({
+      type: "image",
+      mediaType: mediaType as "image/jpeg" | "image/png",
+      data,
+      label: `Captura original «${r.name}» (para consultar; si necesitas su logo, foto o icono recórtalo de aquí con captura:${r.id}#x,y,ancho,alto en píxeles de la imagen completa de ${w}×${h})`,
+    });
+  }
+  return out;
+}
