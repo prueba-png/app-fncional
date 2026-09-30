@@ -5,7 +5,7 @@ import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
 import { useChat } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
-import { slugify, timeAgo } from "../lib/util";
+import { canResume, resumePrompt, slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { readTelegramDbConfig } from "../lib/telegramDb";
@@ -16,6 +16,7 @@ import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
 import type { Project } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { ExportDialog } from "./ExportDialog";
+import { TranslateDialog } from "./TranslateDialog";
 import { Icon } from "./Icon";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
@@ -563,6 +564,7 @@ function ResultScreen() {
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
   const [showKey, setShowKey] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [translateOpen, setTranslateOpen] = useState(false);
   const [extraImages, setExtraImages] = useState<File[]>([]);
   const [preparing, setPreparing] = useState(false);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -688,6 +690,15 @@ function ResultScreen() {
           <button className="btn" aria-label="Guardar en Telegram" onClick={() => void saveTelegram()} disabled={busy === "tg"} title="Guardar una copia en tu Telegram">
             {busy === "tg" ? <span className="spinner" /> : <Icon name="cloud" />} <span className="label">Telegram</span>
           </button>
+          <button
+            className="btn"
+            aria-label="Traducir"
+            onClick={() => (canUseAi ? setTranslateOpen(true) : setShowKey(true))}
+            disabled={streaming}
+            title="Traduce todos los textos de la página a otro idioma"
+          >
+            <Icon name="translate" /> <span className="label">Traducir</span>
+          </button>
           <button className="btn" aria-label="Ver código" onClick={() => setMode("advanced")} title="Abrir el editor de código">
             <Icon name="terminal" /> <span className="label">Ver código</span>
           </button>
@@ -718,10 +729,18 @@ function ResultScreen() {
             ) : (
               <span className="muted">{parseFileBlocks(lastAi.content).prose.slice(0, 200) || "Cambio aplicado."}</span>
             )}
-            {lastAi.meta?.error && !lastAi.meta?.changed?.length && lastUserPrompt && (
-              <button className="btn sm primary" onClick={() => void useChat.getState().send(lastUserPrompt)}>
-                <Icon name="refresh" size={12} /> Reintentar
+            {lastAi.meta?.error && lastUserPrompt && canResume(lastAi.meta.error) ? (
+              <button className="btn sm primary" onClick={() => void useChat.getState().send(resumePrompt(lastUserPrompt))} title="Termina lo que quedó a medias sin rehacer lo que ya está bien">
+                <Icon name="refresh" size={12} /> Continuar
               </button>
+            ) : (
+              lastAi.meta?.error &&
+              !lastAi.meta?.changed?.length &&
+              lastUserPrompt && (
+                <button className="btn sm primary" onClick={() => void useChat.getState().send(lastUserPrompt)}>
+                  <Icon name="refresh" size={12} /> Reintentar
+                </button>
+              )
             )}
             {undoTarget && (
               <button className="btn sm" onClick={() => void restoreVersion(undoTarget.id)}>
@@ -809,6 +828,7 @@ function ResultScreen() {
         </div>
       </div>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <TranslateDialog open={translateOpen} onClose={() => setTranslateOpen(false)} />
     </div>
   );
 }

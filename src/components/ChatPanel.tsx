@@ -6,6 +6,7 @@ import type { ChatMessage } from "../db/db";
 import { Icon } from "./Icon";
 import { ServerNotice } from "./ServerNotice";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
+import { canResume, resumePrompt } from "../lib/util";
 
 const SUGGESTIONS = [
   "Añade un formulario de contacto accesible con validación",
@@ -25,7 +26,7 @@ function Prose({ text }: { text: string }) {
   );
 }
 
-function AssistantMessage({ m }: { m: ChatMessage }) {
+function AssistantMessage({ m, isLast, prevUserPrompt }: { m: ChatMessage; isLast: boolean; prevUserPrompt: string }) {
   const versions = useStudio((s) => s.versions);
   const { restoreVersion, setTab, ask } = useStudio.getState();
   const parsed = parseFileBlocks(m.content);
@@ -50,6 +51,15 @@ function AssistantMessage({ m }: { m: ChatMessage }) {
           <span title={m.meta.model}>
             {m.meta.usage.input.toLocaleString("es")} → {m.meta.usage.output.toLocaleString("es")} tokens
           </span>
+        )}
+        {isLast && m.meta?.error && canResume(m.meta.error) && prevUserPrompt && (
+          <button
+            className="btn sm primary"
+            onClick={() => void useChat.getState().send(resumePrompt(prevUserPrompt))}
+            title="Termina lo que quedó a medias sin rehacer lo que ya está bien"
+          >
+            <Icon name="refresh" size={12} /> Continuar
+          </button>
         )}
         {previous && (
           <button
@@ -122,7 +132,7 @@ export function ChatPanel() {
             </div>
           </div>
         )}
-        {messages.map((m) =>
+        {messages.map((m, i) =>
           m.role === "user" ? (
             <div key={m.id} className="msg user">
               <Prose text={m.content} />
@@ -137,7 +147,12 @@ export function ChatPanel() {
               ) : null}
             </div>
           ) : (
-            <AssistantMessage key={m.id} m={m} />
+            <AssistantMessage
+              key={m.id}
+              m={m}
+              isLast={i === messages.length - 1 && !streaming}
+              prevUserPrompt={messages[i - 1]?.role === "user" && !messages[i - 1].meta?.attachments?.length ? messages[i - 1].content : ""}
+            />
           ),
         )}
         {streaming && (

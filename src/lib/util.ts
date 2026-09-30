@@ -57,6 +57,21 @@ export function dataUrlParts(dataUrl: string): { mediaType: string; data: string
   return { mediaType: m[1], data: m[2] };
 }
 
+/**
+ * ¿Se puede «continuar» esta respuesta en vez de repetirla entera? Solo cuando el fallo fue por
+ * corte de conexión, truncado por longitud o el usuario pulsó «Detener»: en esos casos el código ya
+ * generado sigue siendo válido y solo falta terminarlo.
+ */
+export function canResume(error?: string): boolean {
+  if (!error) return false;
+  return /se cortó|conexión|incompleto|truncó|truncó por longitud|detenida por el usuario|quedó a medias/i.test(error);
+}
+
+/** Instrucción para retomar una respuesta cortada sin rehacer lo que ya se generó bien. */
+export function resumePrompt(originalPrompt: string): string {
+  return `Se cortó tu respuesta anterior a media generación. Continúa exactamente desde donde la dejaste, completando solo lo que falta o quedó a medias. No repitas ni vuelvas a escribir los ficheros que ya quedaron completos y correctos; deja su contenido igual. Petición original, por si la necesitas de referencia: ${originalPrompt}`;
+}
+
 export function languageOf(path: string): "html" | "css" | "javascript" | "json" | "markdown" | "text" {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   if (["html", "htm", "svg", "xml"].includes(ext)) return "html";
