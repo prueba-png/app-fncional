@@ -9,6 +9,9 @@ import { slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { readTelegramDbConfig } from "../lib/telegramDb";
+import { processReferenceFile } from "../lib/media";
+import { MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
+import * as db from "../db/db";
 import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { Icon } from "./Icon";
@@ -396,8 +399,12 @@ function ResultScreen() {
   const [change, setChange] = useState("");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
   const [showKey, setShowKey] = useState(false);
+  const [extraImages, setExtraImages] = useState<File[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const imageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setShowKey(false), [project?.id]);
+  useEffect(() => setExtraImages([]), [project?.id]);
   if (!project) return null;
 
   const last = messages.at(-1);
@@ -408,11 +415,17 @@ function ResultScreen() {
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
+  const addImages = (files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(f.name));
+    if (imgs.length) setExtraImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_REQUEST));
+    if (imgs.length < files.length) toast("Aquí solo se pueden añadir imágenes. Para vídeos o ZIP, empieza un clon nuevo.", "info");
+  };
+
   const applyChange = async () => {
     const text = change.trim();
-    if (!text || streaming) return;
+    if ((!text && !extraImages.length) || streaming || preparing) return;
     // «Conecta este proyecto con la base de datos de Telegram…» no va a la IA: se conecta directamente
-    if (await handleTelegramDbCommand(text)) {
+    if (text && !extraImages.length && (await handleTelegramDbCommand(text))) {
       setChange("");
       return;
     }
@@ -422,6 +435,31 @@ function ResultScreen() {
     }
     if (!canUseAi) {
       toast("La IA no está disponible aquí. Usa la app en tu ordenador (npm run dev).", "error");
+      return;
+    }
+    // Con imágenes adjuntas: se procesan y se envían como referencia (para componer, añadir pantallas, splash, etc.)
+    if (extraImages.length) {
+      setPreparing(true);
+      try {
+        const refs: db.VisualReference[] = [];
+        for (const f of extraImages) {
+          const ref = await processReferenceFile(f, project.id);
+          await db.saveReference(ref);
+          refs.push(ref);
+        }
+        const { attachments, labels } = referencesToAttachments(refs);
+        setChange("");
+        setExtraImages([]);
+        await useChat.getState().send(text || "Añade estas imágenes al proyecto tal y como te indico.", {
+          attachments,
+          attachmentLabels: labels,
+          mode: "generate-from-reference",
+        });
+      } catch (err) {
+        toast((err as Error).message, "error");
+      } finally {
+        setPreparing(false);
+      }
       return;
     }
     setChange("");
@@ -525,15 +563,53 @@ function ResultScreen() {
             )}
           </div>
         ) : null}
+        {!streaming && !messages.some((m) => m.role === "user" && !m.meta?.attachments?.length) && (
+          <p className="muted small change-hint">
+            Escribe aquí lo que quieras cambiar de lo clonado, o pulsa <Icon name="image" size={12} /> para añadir otra imagen (por ejemplo:
+            «primero muestra esta imagen, haz un splash y luego esta otra»).
+          </p>
+        )}
+        {extraImages.length > 0 && (
+          <div className="foot attach-list">
+            {extraImages.map((f, i) => (
+              <span key={i} className="chip">
+                <Icon name="image" size={11} /> {f.name.slice(0, 24)}
+                <button className="chip-x" aria-label={`Quitar ${f.name}`} onClick={() => setExtraImages((p) => p.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="easy-input-row">
+          <input
+            ref={imageRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              addImages(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
+          <button
+            className="btn big icon"
+            aria-label="Añadir imagen"
+            title="Añadir otra imagen al proyecto"
+            disabled={streaming || preparing}
+            onClick={() => imageRef.current?.click()}
+          >
+            <Icon name="image" />
+          </button>
           <input
             id="easy-change"
             className="input big"
-            placeholder="¿Quieres cambiar algo? Ej.: «pon el botón en verde» o «añade un formulario de contacto»"
+            placeholder={extraImages.length ? "Di cómo usar las imágenes (opcional)…" : "¿Quieres cambiar algo? Ej.: «pon el botón en verde» o «añade un formulario»"}
             value={change}
             onChange={(e) => setChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void applyChange()}
-            disabled={streaming}
+            disabled={streaming || preparing}
             aria-label="Describe el cambio que quieres"
           />
           {streaming ? (
@@ -541,8 +617,13 @@ function ResultScreen() {
               <Icon name="stop" /> <span className="label">Detener</span>
             </button>
           ) : (
-            <button className="btn primary big" aria-label="Aplicar cambio" onClick={() => void applyChange()} disabled={!change.trim()}>
-              <Icon name="send" /> <span className="label">Aplicar</span>
+            <button
+              className="btn primary big"
+              aria-label="Aplicar cambio"
+              onClick={() => void applyChange()}
+              disabled={preparing || (!change.trim() && !extraImages.length)}
+            >
+              {preparing ? <span className="spinner" /> : <Icon name="send" />} <span className="label">Aplicar</span>
             </button>
           )}
         </div>

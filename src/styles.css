@@ -400,3 +400,8 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
 @media (max-width: 760px) {
   .result-note { font-size: 12.5px; padding: 6px 8px; margin: 6px 8px 0; }
 }
+
+.change-hint { margin: 0 0 2px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.change-hint svg { vertical-align: middle; }
+.attach-list { margin: 0 0 2px; }
+.chip-x { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 0 0 4px; }
