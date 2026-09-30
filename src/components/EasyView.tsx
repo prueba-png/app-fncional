@@ -225,7 +225,7 @@ function StartScreen() {
             </div>
           </div>
           <small className="muted">
-            {precision === "exact" ? "Máxima: la copia más fiel (la IA compara su resultado con tu captura y corrige las diferencias), tarda de 2 a 4 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
+            {precision === "exact" ? "Máxima: la copia más fiel (usa las imágenes reales de tu captura y compara el resultado con ella hasta dos veces para corregir diferencias), tarda de 3 a 6 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
             ZIP se abren tal cual.
           </small>
         </section>
@@ -323,7 +323,7 @@ function WorkingScreen() {
               </div>
             )}
             <small className="muted">
-              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 2 a 4 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
+              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 6 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
             </small>
           </div>
         )}
@@ -379,6 +379,7 @@ function ResultScreen() {
   const project = useStudio((s) => s.project);
   const versions = useStudio((s) => s.versions);
   const note = useEasy((s) => (project ? s.notes[project.id] : undefined));
+  const [hiddenNote, setHiddenNote] = useState("");
   const { goHome, setMode } = useEasy.getState();
   const { toast, restoreVersion, setSettingsOpen } = useStudio.getState();
   const { streaming, messages } = useChat();
@@ -481,7 +482,14 @@ function ResultScreen() {
           </button>
         </div>
       </div>
-      {note && <div className="notice result-note">{note}</div>}
+      {note && hiddenNote !== note && (
+        <div className="notice result-note">
+          <span>{note}</span>
+          <button className="btn sm icon ghost" aria-label="Cerrar aviso" title="Cerrar aviso" onClick={() => setHiddenNote(note)}>
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      )}
       <div className="result-preview">
         <PreviewPane simple />
       </div>

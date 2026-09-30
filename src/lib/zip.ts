@@ -38,10 +38,17 @@ function folderName(p: Project, used: Set<string>): string {
   return name;
 }
 
+/** Las imágenes del proyecto se guardan como data URL: en el ZIP van como ficheros binarios */
+function addFile(zip: JSZip, path: string, content: string) {
+  const m = content.match(/^data:[a-z]+\/[\w.+-]+;base64,(.*)$/is);
+  if (m) zip.file(path, m[1], { base64: true });
+  else zip.file(path, content);
+}
+
 /** ZIP con el código fuente del proyecto listo para abrir en cualquier editor o servidor estático. */
 export async function exportSourceZip(project: Project): Promise<Blob> {
   const zip = new JSZip();
-  for (const [path, content] of Object.entries(project.files)) zip.file(path, content);
+  for (const [path, content] of Object.entries(project.files)) addFile(zip, path, content);
   if (!("README.md" in project.files)) {
     zip.file(
       "README.md",
@@ -69,7 +76,7 @@ export async function createBackupBundle(bundles: ProjectBundle[]): Promise<Blob
     const folder = folderName(b.project, used);
     manifest.projects.push({ id: b.project.id, name: b.project.name, folder });
     const dir = zip.folder(folder)!;
-    for (const [path, content] of Object.entries(b.project.files)) dir.file(`src/${path}`, content);
+    for (const [path, content] of Object.entries(b.project.files)) addFile(dir, `src/${path}`, content);
     dir.file("project.json", JSON.stringify({ ...b.project, files: undefined }, null, 2));
     dir.file("files.json", JSON.stringify(b.project.files));
     dir.file("versions.json", JSON.stringify(b.versions));

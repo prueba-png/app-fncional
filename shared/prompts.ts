@@ -30,12 +30,14 @@ Base de datos en Telegram:
 - Si el usuario pide conectar con Telegram y el proyecto aún no tiene telegram-db.js, explícale que pulse el botón «Datos» (o que escriba el token y el ID del chat en la misma frase).`;
 
 export const REFERENCE_PROMPT = `Modo "referencia visual": el usuario adjunta capturas de pantalla, fotogramas de vídeo o ficheros de diseño.
-Analiza la composición (layout, rejilla, espaciados, jerarquía tipográfica, paleta de color, componentes, estados) y reprodúcela con HTML y CSS propios con la máxima fidelidad, como una copia píxel a píxel.
-- Copia literalmente los textos visibles; usa contenido de ejemplo solo donde el texto no se lea.
-- Respeta las medidas: deduce los píxeles CSS a partir del tamaño de la captura (las de móvil suelen estar a 2x o 3x) y usa valores concretos (px) para anchos, alturas, márgenes, tamaños de letra y radios.
-- Usa variables CSS para la paleta y la tipografía detectadas, con los colores exactos de la imagen.
-- Sustituye imágenes fotográficas por marcadores (bloques con color o gradiente, o https://placehold.co) salvo que el usuario indique otra fuente.
-- Si hay varios fotogramas de un vídeo, interprétalos como estados o pantallas de una misma interfaz y, cuando tenga sentido, implementa las transiciones o interacciones que se deducen.`;
+Tu objetivo es una copia EXACTA, píxel a píxel: quien compare tu página con la captura no debe notar diferencias.
+- Copia literalmente todos los textos visibles, sin resumir, traducir ni inventar. Usa contenido de ejemplo solo donde el texto no se lea.
+- Las capturas largas llegan en trozos ("parte i/n") con su posición: reconstruye la página completa de arriba abajo, sin saltarte ninguna sección.
+- Medidas: trabaja en píxeles CSS. El ancho de pantalla estimado viene en los datos de la captura; convierte las medidas de la imagen a px CSS con esa proporción y usa valores concretos (px) para anchos máximos, alturas, márgenes, rellenos, tamaños de letra, interlineados, radios y sombras.
+- Colores exactos (hex) muestreados de la imagen, definidos como variables CSS. Tipografía: la de Google Fonts más parecida (mismo tipo, peso y anchura).
+- Imágenes reales: para fotos, logotipos, ilustraciones, avatares, banderas o iconos complejos NO uses marcadores ni imágenes externas; recórtalos de la propia captura con src="captura:<id>#x,y,ancho,alto" (en <img> o en url() de CSS), con el id y las coordenadas en píxeles de la imagen completa que se indican en los datos. Recorta con precisión el rectángulo de cada imagen, sin márgenes de fondo. La app sustituye cada referencia por el recorte real.
+- Iconos sencillos (flechas, menú, lupa, redes sociales) mejor como SVG en línea del mismo color y tamaño.
+- Si hay varios fotogramas de un vídeo, son estados o pantallas de la misma interfaz: reprodúcelos todos (secciones, menús abiertos, pestañas) e implementa las transiciones o interacciones que se deducen.`;
 
 /** Contexto con los ficheros actuales del proyecto. Lanza un error si supera `maxChars`. */
 export function buildFilesContext(files: Record<string, string>, activeFile: string | undefined, maxChars: number): string {
@@ -43,7 +45,9 @@ export function buildFilesContext(files: Record<string, string>, activeFile: str
   if (!entries.length) return "El proyecto está vacío.";
   let total = 0;
   const parts: string[] = [];
-  for (const [path, content] of entries) {
+  for (const [path, rawContent] of entries) {
+    // Imágenes guardadas en el proyecto (recortes de la captura): no se envía su contenido
+    const content = /^data:[a-z]+\/[\w.+-]+;base64,/i.test(rawContent) ? "(imagen recortada de la captura: no reescribas este fichero)" : rawContent;
     total += content.length;
     if (total > maxChars) {
       throw new Error(

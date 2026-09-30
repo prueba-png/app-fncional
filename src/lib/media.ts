@@ -6,10 +6,15 @@
  */
 import type { VisualReference } from "../db/db";
 import { uid } from "./util";
+import { cssViewport } from "./snapshot";
 
 const MAX_EDGE = 1568; // lado máximo recomendado para visión
 const VIDEO_EDGE = 1280;
-const MAX_FRAMES = 8;
+const MAX_FRAMES = 10;
+/** Píxeles por imagen enviada: por encima el modelo la reduce y se pierden los detalles */
+const MAX_TILE_PIXELS = 1_150_000;
+const MAX_TILES = 10;
+const MAX_CANVAS_EDGE = 16_000;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const MAX_INPUT_BYTES = 200 * 1024 * 1024;
 
@@ -73,16 +78,76 @@ export function extractPalette(ctx: CanvasRenderingContext2D, w: number, h: numb
   return picked.map(([r, g, b]) => toHex(Math.round(r), Math.round(g), Math.round(b)));
 }
 
-async function processImage(src: string): Promise<{ frame: string; palette: string[]; width: number; height: number }> {
+interface ProcessedImage {
+  frame: string;
+  palette: string[];
+  width: number;
+  height: number;
+  full: string;
+  fullWidth: number;
+  fullHeight: number;
+  tiles?: Array<{ data: string; y: number; h: number }>;
+}
+
+/**
+ * Prepara una captura para que la IA la vea con todo detalle:
+ * - `frame`: vista general reducida (miniaturas, paleta).
+ * - `full`: la captura a buena resolución (hasta 2 píxeles por píxel de pantalla, máx. 1280 de ancho).
+ * - `tiles`: si es larga (una página entera), trozos de arriba abajo para que ningún texto quede ilegible.
+ */
+async function processImage(src: string): Promise<ProcessedImage> {
   const img = await loadImage(src);
   const w = img.naturalWidth || 1024;
   const h = img.naturalHeight || 768;
   const { canvas, ctx } = drawScaled(img, w, h, MAX_EDGE);
+
+  const css = cssViewport(w, h);
+  let fullW = Math.min(w, 1280, css.width * 2);
+  let fullH = Math.round((fullW * h) / w);
+  if (fullH > MAX_CANVAS_EDGE) {
+    fullW = Math.max(1, Math.floor((fullW * MAX_CANVAS_EDGE) / fullH));
+    fullH = MAX_CANVAS_EDGE;
+  }
+  let tileH = Math.min(MAX_EDGE, Math.floor(MAX_TILE_PIXELS / fullW));
+  if (Math.ceil(fullH / tileH) > MAX_TILES) {
+    // Página larguísima: se reduce un poco para no superar el número máximo de trozos
+    const k = Math.sqrt((MAX_TILES * tileH) / fullH);
+    fullW = Math.max(1, Math.floor(fullW * k));
+    fullH = Math.round((fullW * h) / w);
+    tileH = Math.min(MAX_EDGE, Math.floor(MAX_TILE_PIXELS / fullW));
+  }
+  const big = document.createElement("canvas");
+  big.width = fullW;
+  big.height = fullH;
+  const bctx = big.getContext("2d")!;
+  bctx.fillStyle = "#ffffff";
+  bctx.fillRect(0, 0, fullW, fullH);
+  bctx.imageSmoothingQuality = "high";
+  bctx.drawImage(img, 0, 0, fullW, fullH);
+
+  let tiles: ProcessedImage["tiles"];
+  if (fullH > tileH) {
+    tiles = [];
+    const overlap = 48;
+    for (let y = 0; y < fullH; y += tileH - overlap) {
+      const th = Math.min(tileH, fullH - y);
+      const t = document.createElement("canvas");
+      t.width = fullW;
+      t.height = th;
+      t.getContext("2d")!.drawImage(big, 0, y, fullW, th, 0, 0, fullW, th);
+      tiles.push({ data: t.toDataURL("image/jpeg", 0.88), y, h: th });
+      if (y + th >= fullH) break;
+    }
+  }
   return {
     frame: canvas.toDataURL("image/jpeg", 0.9),
     palette: extractPalette(ctx, canvas.width, canvas.height),
     width: w,
     height: h,
+    full: big.toDataURL("image/jpeg", 0.9),
+    fullWidth: fullW,
+    fullHeight: fullH,
+    tiles,
   };
 }
 
@@ -110,7 +175,47 @@ function waitEvent(el: HTMLMediaElement, event: string, timeout = 15000): Promis
   });
 }
 
-/** Extrae fotogramas equiespaciados de un vídeo local. */
+/**
+ * Elige los momentos del vídeo en los que la pantalla cambia (scroll, otra página, un menú abierto…)
+ * para no perder partes de la interfaz. Si el vídeo apenas cambia, usa momentos equiespaciados.
+ */
+async function pickDistinctTimes(video: HTMLVideoElement, duration: number, n: number): Promise<number[]> {
+  const even = Array.from({ length: n }, (_, i) => (duration * (i + 0.5)) / n);
+  const samples = Math.min(48, Math.max(n, Math.round(duration / 0.4)));
+  if (samples <= n) return even;
+  const sw = 48;
+  const sh = Math.max(1, Math.round((sw * (video.videoHeight || 9)) / (video.videoWidth || 16)));
+  const c = document.createElement("canvas");
+  c.width = sw;
+  c.height = sh;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  let last: Uint8ClampedArray | null = null;
+  const kept: Array<{ t: number; change: number }> = [];
+  const started = Date.now();
+  for (let i = 0; i < samples; i++) {
+    if (Date.now() - started > 20_000) return even; // vídeo muy lento de decodificar
+    const t = (duration * (i + 0.5)) / samples;
+    video.currentTime = t;
+    await waitEvent(video, "seeked");
+    ctx.drawImage(video, 0, 0, sw, sh);
+    const data = ctx.getImageData(0, 0, sw, sh).data;
+    let diff = 0;
+    if (last) {
+      for (let p = 0; p < data.length; p += 4) diff += Math.abs(data[p] - last[p]) + Math.abs(data[p + 1] - last[p + 1]) + Math.abs(data[p + 2] - last[p + 2]);
+      diff /= (data.length / 4) * 765;
+    }
+    if (!last || diff > 0.035) {
+      kept.push({ t, change: last ? diff : 1 });
+      last = new Uint8ClampedArray(data);
+    }
+  }
+  if (kept.length < Math.min(3, n)) return even;
+  if (kept.length <= n) return kept.map((k) => k.t);
+  // Demasiados cambios: se reparten a lo largo del vídeo, conservando el primero
+  return Array.from({ length: n }, (_, i) => kept[Math.round((i * (kept.length - 1)) / (n - 1 || 1))].t);
+}
+
+/** Extrae fotogramas de un vídeo local (los momentos en que cambia la pantalla). */
 export async function extractVideoFrames(file: Blob, frames = 6, onProgress?: (p: number) => void) {
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
@@ -122,7 +227,7 @@ export async function extractVideoFrames(file: Blob, frames = 6, onProgress?: (p
     await waitEvent(video, "loadeddata");
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
     const n = Math.min(MAX_FRAMES, Math.max(1, frames));
-    const times = duration > 0 ? Array.from({ length: n }, (_, i) => (duration * (i + 0.5)) / n) : [0];
+    const times = duration > 0 ? await pickDistinctTimes(video, duration, n) : [0];
     const out: string[] = [];
     let palette: string[] = [];
     for (let i = 0; i < times.length; i++) {
@@ -159,7 +264,18 @@ export async function processReferenceFile(
   }
   if (type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif)$/.test(lower)) {
     const img = await processImage(await readAs(file, "dataURL"));
-    return { ...base, kind: "image", frames: [img.frame], palette: img.palette, width: img.width, height: img.height };
+    return {
+      ...base,
+      kind: "image",
+      frames: [img.frame],
+      palette: img.palette,
+      width: img.width,
+      height: img.height,
+      full: img.full,
+      fullWidth: img.fullWidth,
+      fullHeight: img.fullHeight,
+      tiles: img.tiles,
+    };
   }
   if (type.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv)$/.test(lower)) {
     const v = await extractVideoFrames(file, opts.videoFrames ?? 6, opts.onProgress);

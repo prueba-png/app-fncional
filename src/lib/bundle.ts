@@ -34,6 +34,7 @@ export function resolveLocalPath(ref: string, fromPage: string, files: FileMap):
 }
 
 function toDataUrl(path: string, content: string): string {
+  if (/^data:[a-z]+\/[\w.+-]+;base64,/i.test(content)) return content; // imagen guardada como data URL (recortes de capturas)
   const ext = path.split(".").pop()?.toLowerCase() ?? "txt";
   const mime = MIME[ext] ?? "text/plain";
   return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
@@ -52,7 +53,9 @@ function bridgeScript(pages: string[]): string {
   window.addEventListener('unhandledrejection',function(e){send('error',['Promesa rechazada: '+ser(e.reason)])});
   document.addEventListener('click',function(e){
     var a=e.target&&e.target.closest?e.target.closest('a[href]'):null; if(!a)return;
-    var href=a.getAttribute('href')||''; if(/^#/.test(href))return;
+    var href=a.getAttribute('href')||'';
+    if(/^#/.test(href)){e.preventDefault();var id=decodeURIComponent(href.slice(1));var t=id&&(document.getElementById(id)||document.getElementsByName(id)[0]);if(t)t.scrollIntoView({behavior:'smooth'});else if(!id||id==='top')window.scrollTo({top:0,behavior:'smooth'});return;}
+    if(/^https?:\\/\\//i.test(href)||/^\\/\\//.test(href)){e.preventDefault();window.open(a.href,'_blank','noopener');return;}
     var clean=href.split('#')[0].split('?')[0].replace(/^\\.\\//,'').replace(/^\\//,'');
     if(pages.indexOf(clean)!==-1){e.preventDefault();parent.postMessage({flag:F,type:'navigate',path:clean},'*');}
     else if(!/^[a-z]+:/i.test(href)&&!/^\\/\\//.test(href)){e.preventDefault();send('warn',['Enlace local no encontrado en el proyecto: '+href]);}
@@ -64,6 +67,8 @@ export interface BuildOptions {
   page?: string;
   autoInjectDeps?: boolean;
   bridge?: boolean;
+  /** Clones de webs: dirección original, para que los scripts carguen sus recursos como en la web real */
+  baseUrl?: string;
 }
 
 export function findEntry(files: FileMap): string | null {
@@ -87,13 +92,22 @@ export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): s
     const from = page;
 
     // <link rel="stylesheet" href="local.css"> → <style>
+    // url(recurso-local) dentro del CSS → data URL (las rutas son relativas a la hoja de estilos)
+    const inlineCssUrls = (css: string, cssPath: string) =>
+      css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (m, q: string, ref: string) => {
+        const local = resolveLocalPath(ref, cssPath, files);
+        return local && !/\.(css|html?)$/i.test(local) ? `url(${q}${toDataUrl(local, files[local])}${q})` : m;
+      });
+    html = html.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_m, open: string, css: string, close: string) => open + inlineCssUrls(css, from) + close);
+    html = html.replace(/\bstyle\s*=\s*"([^"]*url\([^"]*)"/gi, (_m, css: string) => `style="${inlineCssUrls(css.replace(/&quot;/g, "'"), from)}"`);
+
     html = html.replace(/<link\b[^>]*>/gi, (tag) => {
       if (!/rel\s*=\s*["']?[^"'>]*stylesheet/i.test(tag)) return tag;
       const href = tag.match(/href\s*=\s*["']([^"']+)["']/i)?.[1];
       const local = href ? resolveLocalPath(href, from, files) : null;
       if (!local) return tag;
       const media = tag.match(/media\s*=\s*["']([^"']+)["']/i)?.[1];
-      return `<style data-file="${local}"${media ? ` media="${media}"` : ""}>\n${escapeForTag(files[local], "style")}\n</style>`;
+      return `<style data-file="${local}"${media ? ` media="${media}"` : ""}>\n${escapeForTag(inlineCssUrls(files[local], local), "style")}\n</style>`;
     });
 
     // <script src="local.js"></script> → <script>
@@ -122,6 +136,13 @@ export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): s
       body.push(...tags.body);
     }
     if (head.length || body.length) html = injectTags(html, head, body);
+  }
+
+  if (opts.baseUrl) {
+    const baseTag = `<base href="${opts.baseUrl.replace(/"/g, "&quot;")}">`;
+    html = html.replace(/<base\b[^>]*>/gi, "");
+    if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}`);
+    else html = baseTag + html;
   }
 
   if (bridge) {

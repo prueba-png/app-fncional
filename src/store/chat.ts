@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { hasCaptureRefs, resolveCrops } from "../lib/crops";
 import type { ChatAttachment, ChatTurn } from "../../shared/types";
 import { parseFileBlocks } from "../../shared/fileBlocks";
 import * as db from "../db/db";
@@ -166,9 +167,19 @@ export const useChat = create<ChatState>((set, get) => ({
     const changed = Object.keys(parsed.updated);
     let versionId: string | undefined;
     if (stillSameProject && (changed.length || parsed.deleted.length)) {
-      const v = await useStudio
-        .getState()
-        .applyChanges(parsed.updated, parsed.deleted, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
+      // Las imágenes que la IA toma de la captura (captura:…) se recortan y se guardan como ficheros
+      let toWrite = parsed.updated;
+      let toDelete = parsed.deleted;
+      if (hasCaptureRefs(toWrite)) {
+        try {
+          const crops = await resolveCrops(toWrite, useStudio.getState().project!.files, project.id);
+          toWrite = crops.updated;
+          toDelete = [...new Set([...toDelete, ...crops.deleted])];
+        } catch {
+          /* sin recortes: se aplica tal cual */
+        }
+      }
+      const v = await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
       versionId = v?.id;
     }
     if (parsed.incomplete && !error) {

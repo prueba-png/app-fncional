@@ -6,12 +6,13 @@ import { create } from "zustand";
 import type { ChatAttachment, FileMap } from "../../shared/types";
 import * as db from "../db/db";
 import { ingest } from "../lib/api";
-import { ingestViaRelay } from "../lib/proxyIngest";
+import { fetchSiteScreenshot, ingestViaRelay } from "../lib/proxyIngest";
 import { processReferenceFile } from "../lib/media";
 import { getSample, sampleSupportsImages } from "../lib/runtime";
 import { countImages, MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
 import { readZip } from "../lib/zip";
-import { cssViewport, renderSnapshot } from "../lib/snapshot";
+import { cssViewport, probeRender, renderSnapshot } from "../lib/snapshot";
+import { compareImages } from "../lib/compare";
 import { dataUrlParts } from "../lib/util";
 import { useChat } from "./chat";
 import { aiAvailable, needsApiKey, useStudio } from "./studio";
@@ -108,21 +109,22 @@ function isVisual(f: File) {
   return f.type.startsWith("image/") || f.type.startsWith("video/") || f.type === "application/pdf" || VISUAL_RE.test(f.name);
 }
 
-const CLONE_PROMPT = `Clona EXACTAMENTE la interfaz que aparece en los archivos adjuntos, como si fuera una copia pixel a pixel.
-- Copia literalmente todos los textos visibles (títulos, menús, botones, precios, pies de página), sin resumir ni traducir.
-- Reproduce la misma estructura, el mismo orden de secciones y las mismas proporciones: anchos, altos, márgenes y espaciados relativos al tamaño de la captura indicado.
-- Usa los colores exactos de la captura (la paleta extraída te ayuda) y la tipografía más parecida de Google Fonts, con los mismos tamaños y pesos relativos.
-- Reproduce iconos, bordes, sombras, esquinas redondeadas y fondos (gradientes incluidos). Para fotos usa bloques del mismo color dominante.
-- Si la captura es de móvil (vertical y estrecha), el diseño principal debe ser el móvil; si es de escritorio, el de escritorio. Añade además adaptación responsive.
+const CLONE_PROMPT = `Clona EXACTAMENTE la interfaz de los archivos adjuntos: una copia píxel a píxel, no una interpretación.
+- Recorre la captura de arriba abajo (todas sus partes) y reproduce cada sección, en el mismo orden, con todos sus textos copiados literalmente.
+- Mismas medidas en px CSS (usa el ancho de pantalla estimado), mismos colores exactos, misma tipografía y pesos, mismos bordes, sombras, radios y fondos.
+- Fotos, logotipos, ilustraciones e iconos complejos: recórtalos de la captura con captura:<id>#x,y,ancho,alto (no uses marcadores).
+- Si la captura es de móvil, el diseño principal es el de móvil; si es de escritorio, el de escritorio. Añade además adaptación responsive sin alterar ese diseño.
 - Crea una página completa y funcional: index.html, styles.css y script.js.`;
 
-const REFINE_PROMPT = `Revisión píxel a píxel. Te adjunto dos imágenes:
-1) ORIGINAL: la captura que hay que copiar.
-2) TU VERSIÓN: cómo se ve ahora mismo tu código, pintado al mismo ancho de pantalla.
-Compáralas zona por zona, de arriba abajo, y corrige TODAS las diferencias visibles: textos que faltan o cambian, orden de secciones, anchos y altos, márgenes y espaciados, tamaños y pesos de letra, interlineado, colores de fondo y de texto, bordes, sombras, esquinas, iconos y alineaciones.
-- Mide las proporciones sobre la captura original y ajusta los valores CSS para que coincidan.
-- No añadas nada que no esté en el original ni cambies lo que ya coincide.
-- (La versión pintada puede no mostrar imágenes externas ni algunos efectos: no lo cuentes como diferencia.)
+const refinePrompt = (score: number, parts: number) => `Revisión píxel a píxel (parecido actual: ${Math.round(score * 100)} %).
+Te adjunto ${parts > 1 ? `${parts} imágenes, de arriba abajo de la página,` : "una imagen"} con la captura ORIGINAL a la izquierda y TU VERSIÓN a la derecha, pintada con tu código al mismo ancho de pantalla. Las zonas en rojo son las que no coinciden.
+Corrige TODAS las diferencias, empezando por las más grandes:
+1. Estructura: secciones que faltan, sobran o están en otro orden; elementos desplazados. Si tu versión es más alta o más baja que el original, ajusta alturas, márgenes y rellenos hasta que cada sección empiece a la misma altura.
+2. Medidas: anchos, altos, márgenes, rellenos, tamaños de letra, interlineado y radios (mídelos en el original).
+3. Colores de fondo, de texto y de bordes; sombras; tipografía y pesos.
+4. Imágenes: si una imagen no coincide, recórtala de la captura con captura:<id>#x,y,ancho,alto (revisa las coordenadas si el recorte salió desplazado).
+- No cambies lo que ya coincide ni añadas nada que no esté en el original.
+- Las imágenes externas pueden no verse en tu versión: no las cuentes como diferencia.
 Explica en una frase qué has corregido y devuelve los ficheros corregidos completos.`;
 
 const DESCRIBE_PROMPT = `No puedes ver la imagen original: esta vista no permite enviar imágenes.
@@ -183,7 +185,7 @@ export const useEasy = create<EasyState>((set, get) => {
     prompt: string,
     attachments: ChatAttachment[],
     labels: string[],
-    extra: { webFetch?: boolean; note?: string; refine?: () => Promise<void> } = {},
+    extra: { webFetch?: boolean; note?: string; refine?: () => Promise<string | undefined> } = {},
   ) => {
     advance(1);
     const unsubscribe = useChat.subscribe((s) => {
@@ -213,41 +215,75 @@ export const useEasy = create<EasyState>((set, get) => {
       fail("La IA no devolvió ninguna página. Prueba con una captura más clara o añade más detalles.");
       return;
     }
+    let refineNote: string | undefined;
     if (extra.refine && !last?.meta?.error) {
       advance(3);
-      await extra.refine();
+      refineNote = await extra.refine();
       if (get().stage !== "working") return;
     }
     advance((get().job?.steps.length ?? 4) - 1);
-    finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : extra.note);
+    finish(last?.meta?.error ? "La IA avisó de un problema y el resultado puede estar incompleto. Puedes pedirle que lo termine." : (extra.note ?? refineNote));
   };
 
   /**
-   * Segunda pasada (precisión máxima): pinta el clon al tamaño de la captura, se lo enseña a la IA
-   * junto al original y le pide que corrija las diferencias. Si algo falla, se queda el primer resultado.
+   * Pasadas de comparación (precisión máxima): pinta el clon al tamaño de la captura, lo compara con el
+   * original, marca en rojo lo que no coincide y la IA lo corrige. Se repite mientras mejore y al final se
+   * conserva la versión más parecida. Si algo falla, se queda el resultado que ya había.
    */
-  const refineAgainst = async (ref: db.VisualReference) => {
-    const files = useStudio.getState().project?.files;
-    if (!files || !ref.width || !ref.height || !ref.frames[0]) return;
-    let shot: string;
+  const refineAgainst = async (ref: db.VisualReference, rounds = 2): Promise<string | undefined> => {
+    const original = ref.full ?? ref.frames[0];
+    if (!original || !ref.width || !ref.height) return;
+    const viewport = cssViewport(ref.width, ref.height);
+    const measure = async () => {
+      const files = useStudio.getState().project!.files;
+      const shot = await renderSnapshot(files, viewport);
+      return { files, cmp: await compareImages(original, shot) };
+    };
+    const label = (text: string) =>
+      setSteps((steps) => steps.map((st, i) => (i === 3 && st.label.startsWith("Comparando") ? { ...st, label: text } : st)));
+
+    let current: Awaited<ReturnType<typeof measure>>;
     try {
-      shot = await renderSnapshot(files, cssViewport(ref.width, ref.height));
+      current = await measure();
     } catch (err) {
       console.warn("Comparación visual omitida:", (err as Error).message);
       return;
     }
-    if (get().stage !== "working") return;
-    const original = dataUrlParts(ref.frames[0]);
-    const rendered = dataUrlParts(shot);
-    const attachments: ChatAttachment[] = [
-      { type: "image", mediaType: original.mediaType as "image/jpeg", data: original.data, label: "ORIGINAL" },
-      { type: "image", mediaType: rendered.mediaType as "image/jpeg", data: rendered.data, label: "TU VERSIÓN" },
-    ];
-    await useChat.getState().send(REFINE_PROMPT, {
-      attachments,
-      attachmentLabels: [`${ref.name} (original)`, "Vista previa actual"],
-      mode: "generate-from-reference",
-    });
+    let best = { files: current.files, score: current.cmp.score };
+    for (let round = 1; round <= rounds; round++) {
+      if (get().stage !== "working" || best.score >= 0.985) break;
+      label(`Comparando con tu captura y corrigiendo diferencias (ronda ${round}/${rounds} · parecido ${Math.round(current.cmp.score * 100)} %)`);
+      const attachments: ChatAttachment[] = current.cmp.composites.map((c, i) => {
+        const { mediaType, data } = dataUrlParts(c);
+        return { type: "image", mediaType: mediaType as "image/jpeg", data, label: `Comparación ${i + 1}/${current.cmp.composites.length}` };
+      });
+      attachments.push({
+        type: "text",
+        text: `Datos de la captura: id ${ref.id}; imagen completa ${ref.fullWidth ?? ref.width}×${ref.fullHeight ?? ref.height} px; ancho de pantalla ${viewport.width} px CSS.`,
+      });
+      await useChat.getState().send(refinePrompt(current.cmp.score, current.cmp.composites.length), {
+        attachments,
+        attachmentLabels: [`${ref.name} (comparación ${round})`],
+        mode: "generate-from-reference",
+      });
+      if (get().stage !== "working") return;
+      if (useChat.getState().messages.at(-1)?.meta?.error) break;
+      const before = best.score;
+      try {
+        current = await measure();
+      } catch {
+        break;
+      }
+      if (current.cmp.score > best.score) best = { files: current.files, score: current.cmp.score };
+      if (current.cmp.score - before < 0.003) break; // ya no mejora
+    }
+    // Se queda la versión más parecida a la captura
+    const now = useStudio.getState().project?.files;
+    if (now && now !== best.files) {
+      const deleted = Object.keys(now).filter((p) => !(p in best.files));
+      await useStudio.getState().applyChanges({ ...best.files }, deleted, "Versión más parecida a la captura", "ai");
+    }
+    return `Parecido con tu captura: ${Math.round(best.score * 100)} %. Si ves alguna diferencia, escríbela abajo (por ejemplo «el título es más grande») y la IA la corrige.`;
   };
 
   return {
@@ -360,11 +396,26 @@ export const useEasy = create<EasyState>((set, get) => {
           result = await download({ url: result.finalUrl, keepScripts: true });
           if (signal.aborted) return;
         }
-        if (result.looksClientRendered)
+        let files = result.files;
+        if (result.staticFiles) {
+          // ¿Funcionan los scripts de la web fuera de ella? Se abren las dos versiones y se elige la que muestra la página completa
+          setSteps((steps) => steps.map((st, i) => (i === 1 ? { ...st, label: "Comprobando que el clon se ve igual que la web" } : st)));
+          const [withJs, without] = await Promise.all([
+            probeRender(result.files, { baseUrl: result.finalUrl }),
+            probeRender(result.staticFiles, { baseUrl: result.finalUrl }),
+          ]);
+          if (signal.aborted) return;
+          const scriptsWork = !!withJs && withJs.text >= 20 && (!without || (withJs.text >= without.text * 0.6 && withJs.visible >= without.visible * 0.5));
+          if (!scriptsWork) {
+            files = result.staticFiles;
+            note = "Los scripts de esta web no funcionan fuera de ella, así que el clon muestra la página tal como se ve, pero sin sus animaciones ni menús desplegables.";
+          }
+        }
+        if (result.looksClientRendered && files === result.files)
           note =
             "Esta web se genera con JavaScript, así que el clon conserva sus scripts. Algunas partes (inicio de sesión, datos en vivo) pueden no funcionar fuera de la web original.";
         advance(result.looksClientRendered && !keepScripts ? 3 : 2);
-        const { files, ...report } = result;
+        const { files: _all, staticFiles: _static, ...report } = result;
         await useStudio.getState().createProject({
           name: result.title ? result.title.slice(0, 60) : host,
           files,
@@ -373,6 +424,8 @@ export const useEasy = create<EasyState>((set, get) => {
           message: `Clon de ${result.finalUrl}`,
           source: "ingest",
         });
+        // Un clon exacto no debe recibir librerías añadidas automáticamente (cambiarían su aspecto)
+        useStudio.getState().setAutoInjectDeps(false);
         if (result.warnings.length && !note) note = "Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto.";
         abortController = null;
         finish(note);
@@ -407,22 +460,45 @@ export const useEasy = create<EasyState>((set, get) => {
         return;
       }
       try {
-        await useStudio.getState().createProject({
+        const project = await useStudio.getState().createProject({
           name: host,
           files: { "index.html": "", "styles.css": "", "script.js": "" },
           origin: { type: "url", detail: url },
         });
+        // Una captura real de la web (hecha por un servicio externo) para que la IA copie el diseño exacto
+        let ref: db.VisualReference | null = null;
+        if (studioState.ai === "direct") {
+          setSteps((steps) => steps.map((st, i) => (i === 1 ? { ...st, label: "Haciendo una captura de la web y leyendo su contenido" } : st)));
+          const shot = await fetchSiteScreenshot(url);
+          if (get().stage !== "working") return;
+          if (shot) {
+            try {
+              const blob = await (await fetch(shot.dataUrl)).blob();
+              ref = await processReferenceFile(new File([blob], `${host}.jpg`, { type: blob.type || "image/jpeg" }), project.id);
+              await db.saveReference(ref);
+            } catch {
+              ref = null;
+            }
+          }
+        }
+        const refs = ref ? referencesToAttachments([ref]) : { attachments: [], labels: [] };
+        if (ref && get().precision === "exact") {
+          setSteps((steps) => [...steps.slice(0, 3), { label: "Comparando con la web y corrigiendo diferencias", state: "pending" }, ...steps.slice(3)]);
+        }
         await runAi(
-          `Usa la herramienta web_fetch para leer ${url} y clona esa página con la máxima fidelidad posible.
-- Reproduce su estructura, secciones, textos, navegación, formularios y enlaces principales.
-- Deduce el estilo visual (colores, tipografía, espaciados) de la marca y del contenido; usa las imágenes de la página por su URL absoluta cuando aparezcan.
+          `Clona ${url} con la máxima fidelidad, como una copia píxel a píxel.
+${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (estructura, medidas, colores, tipografía, imágenes) siguiendo las reglas de referencia visual.\n" : ""}- Usa la herramienta web_fetch para leer ${url} y copiar literalmente sus textos, enlaces y navegación.
+- Usa las imágenes de la página por su URL absoluta cuando aparezcan${ref ? " o recórtalas de la captura con captura:<id>#x,y,ancho,alto" : ""}.
 - Crea una página completa: index.html, styles.css y script.js, responsive.
 - Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,
-          [],
-          [],
+          refs.attachments,
+          refs.labels,
           {
             webFetch: true,
-            note: "No se pudo descargar el código original de esta web, así que la IA la ha reconstruido a partir de su contenido: los textos son fieles y el diseño puede variar. Para más exactitud, sube también una captura.",
+            note: ref
+              ? undefined
+              : "No se pudo descargar el código original de esta web, así que la IA la ha reconstruido a partir de su contenido: los textos son fieles y el diseño puede variar. Para más exactitud, sube también una captura.",
+            refine: ref && get().precision === "exact" ? () => refineAgainst(ref!) : undefined,
           },
         );
       } catch (err) {
@@ -529,9 +605,15 @@ export const useEasy = create<EasyState>((set, get) => {
         });
         const refs: db.VisualReference[] = [];
         for (const f of visuals) {
-          const ref = await processReferenceFile(f, project.id, { videoFrames: 6 });
+          const ref = await processReferenceFile(f, project.id, { videoFrames: 8 });
           await db.saveReference(ref);
           refs.push(ref);
+        }
+        // La vista previa se abre con la misma pantalla que la captura (móvil, tablet u ordenador)
+        const first = refs.find((r) => r.width && r.height);
+        if (first) {
+          const w = cssViewport(first.width!, first.height!).width;
+          useStudio.getState().patchProject({ viewport: w < 600 ? "mobile" : w < 1000 ? "tablet" : "desktop" });
         }
         const { attachments, labels } = referencesToAttachments(refs);
         const extra: ChatAttachment[] = [];

@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../store/studio";
 import { BRIDGE_FLAG, buildPreviewDocument, findEntry } from "../lib/bundle";
 import { Icon } from "./Icon";
 
 type Viewport = "desktop" | "tablet" | "mobile";
-const WIDTHS: Record<Viewport, string> = { desktop: "100%", tablet: "820px", mobile: "390px" };
+/** Ancho real (px CSS) de cada pantalla: la página se pinta a ese ancho y se reduce para que quepa entera */
+const DEVICES: Record<Viewport, { width: number; label: string; icon: "monitor" | "tablet" | "phone" }> = {
+  desktop: { width: 1280, label: "Ordenador", icon: "monitor" },
+  tablet: { width: 820, label: "Tablet", icon: "tablet" },
+  mobile: { width: 390, label: "Móvil", icon: "phone" },
+};
 
 interface ConsoleEntry {
   id: number;
@@ -24,8 +29,14 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
   const files = useStudio((s) => s.project?.files);
   const projectId = useStudio((s) => s.project?.id);
   const autoInject = useStudio((s) => s.project?.autoInjectDeps ?? true);
+  const origin = useStudio((s) => s.project?.origin);
+  const preferred = useStudio((s) => s.project?.viewport);
+  const baseUrl = origin?.type === "url" && /^https?:\/\//i.test(origin.detail ?? "") ? origin.detail : undefined;
   const [page, setPage] = useState<string>("");
-  const [viewport, setViewport] = useState<Viewport>("desktop");
+  const [viewport, setViewport] = useState<Viewport>(preferred ?? "desktop");
+  const [full, setFull] = useState(false);
+  const [stage, setStage] = useState({ w: 0, h: 0 });
+  const stageRef = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState("");
   const [nonce, setNonce] = useState(0);
   const [logs, setLogs] = useState<ConsoleEntry[]>([]);
@@ -40,11 +51,30 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
     setPage("");
     setLogs([]);
   }, [projectId]);
+  useEffect(() => setViewport(preferred ?? "desktop"), [projectId, preferred]);
+
+  // Tamaño disponible para la vista previa (cambia al girar el móvil, abrir el teclado o pasar a pantalla completa)
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => setStage({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
 
   const build = () => {
     if (!files) return;
     try {
-      setDoc(buildPreviewDocument(files, { page: page || findEntry(files) || undefined, autoInjectDeps: autoInject }));
+      setDoc(buildPreviewDocument(files, { page: page || findEntry(files) || undefined, autoInjectDeps: autoInject, baseUrl }));
     } catch (err) {
       setDoc(`<pre style="color:#c00;padding:16px">Error al construir la vista previa: ${String((err as Error).message)}</pre>`);
     }
@@ -55,7 +85,7 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
     if (!autoRefresh) return;
     const t = setTimeout(build, 350);
     return () => clearTimeout(t);
-  }, [files, page, autoInject, autoRefresh]);
+  }, [files, page, autoInject, autoRefresh, baseUrl]);
 
   useEffect(() => setLogs([]), [doc, nonce]);
 
@@ -79,8 +109,16 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
 
   const errors = logs.filter((l) => l.level === "error").length;
 
+  // Escala para que el ancho completo de la pantalla elegida quepa sin barras de desplazamiento laterales
+  const pad = stage.w < 560 ? 0 : 12;
+  const availW = Math.max(1, stage.w - pad * 2);
+  const availH = Math.max(1, stage.h - pad * 2);
+  const deviceW = viewport === "desktop" ? Math.max(DEVICES.desktop.width, availW) : DEVICES[viewport].width;
+  const scale = Math.min(1, availW / deviceW);
+  const zoom = Math.round(scale * 100);
+
   return (
-    <>
+    <div className={`preview-shell${full ? " full" : ""}`}>
       <div className="preview-toolbar">
         <Icon name="eye" />
         {pages.length > 1 ? (
@@ -95,10 +133,22 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
           <span className="muted small">{simple ? "Vista previa" : "Vista previa aislada"}</span>
         )}
         <div className="grow" />
+        {zoom < 100 && (
+          <span className="zoom-label small muted" title="La página se muestra reducida para que se vea entera">
+            {zoom}%
+          </span>
+        )}
         <div className="seg" role="group" aria-label="Tamaño de pantalla">
-          {(["desktop", "tablet", "mobile"] as Viewport[]).map((v) => (
-            <button key={v} className={viewport === v ? "active" : ""} onClick={() => setViewport(v)} title={v} aria-pressed={viewport === v}>
-              <Icon name={v === "desktop" ? "monitor" : v === "tablet" ? "tablet" : "phone"} size={14} />
+          {(Object.keys(DEVICES) as Viewport[]).map((v) => (
+            <button
+              key={v}
+              className={viewport === v ? "active" : ""}
+              onClick={() => setViewport(v)}
+              title={`Ver como en ${DEVICES[v].label.toLowerCase()} (${DEVICES[v].width} px)`}
+              aria-label={DEVICES[v].label}
+              aria-pressed={viewport === v}
+            >
+              <Icon name={DEVICES[v].icon} size={14} />
             </button>
           ))}
         </div>
@@ -118,6 +168,15 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
         >
           <Icon name="refresh" size={14} />
         </button>
+        <button
+          className={`btn sm ${full ? "primary" : "icon ghost"}`}
+          title={full ? "Salir de pantalla completa (Esc)" : "Ver en pantalla completa"}
+          aria-label={full ? "Salir de pantalla completa" : "Pantalla completa"}
+          onClick={() => setFull((f) => !f)}
+        >
+          <Icon name={full ? "shrink" : "expand"} size={14} />
+          {full && <span>Salir</span>}
+        </button>
         {!simple && (
           <button className={`btn sm ghost${showConsole ? " active" : ""}`} onClick={() => setShowConsole((s) => !s)} title="Consola">
             <Icon name="terminal" size={14} />
@@ -125,17 +184,19 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
           </button>
         )}
       </div>
-      <div className="preview-stage">
-        <iframe
-          key={nonce}
-          ref={frameRef}
-          className="preview-frame"
-          title="Vista previa del prototipo"
-          sandbox={SANDBOX}
-          referrerPolicy="no-referrer"
-          srcDoc={doc}
-          style={{ width: WIDTHS[viewport] }}
-        />
+      <div className="preview-stage" ref={stageRef} style={{ padding: pad }}>
+        <div className="preview-device" style={{ width: Math.round(deviceW * scale), height: availH }}>
+          <iframe
+            key={nonce}
+            ref={frameRef}
+            className="preview-frame"
+            title="Vista previa del prototipo"
+            sandbox={SANDBOX}
+            referrerPolicy="no-referrer"
+            srcDoc={doc}
+            style={{ width: deviceW, height: Math.ceil(availH / scale), transform: scale < 1 ? `scale(${scale})` : undefined }}
+          />
+        </div>
       </div>
       {showConsole && !simple && (
         <div className="console" aria-label="Consola">
@@ -158,6 +219,6 @@ export function PreviewPane({ simple = false }: { simple?: boolean }) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

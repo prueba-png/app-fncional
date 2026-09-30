@@ -18,6 +18,8 @@ export interface Project {
   origin: { type: "blank" | "template" | "url" | "reference" | "import" | "telegram"; detail?: string };
   ingest?: IngestReport;
   autoInjectDeps: boolean;
+  /** Pantalla con la que se abre la vista previa (la de la captura original o «ordenador» para webs) */
+  viewport?: "desktop" | "tablet" | "mobile";
 }
 
 export type VersionSource = "create" | "manual" | "ai" | "ingest" | "rollback" | "dependency" | "restore";
@@ -66,6 +68,12 @@ export interface VisualReference {
   width?: number;
   height?: number;
   duration?: number;
+  /** Solo imágenes: versión en alta resolución (para leer textos y recortar imágenes reales de la captura) */
+  full?: string;
+  fullWidth?: number;
+  fullHeight?: number;
+  /** Capturas largas: trozos de `full` de arriba abajo (y = posición en píxeles de `full`) */
+  tiles?: Array<{ data: string; y: number; h: number }>;
 }
 
 export interface BackupRecord {

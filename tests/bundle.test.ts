@@ -32,3 +32,30 @@ describe("buildPreviewDocument", () => {
     expect(resolveLocalPath("//cdn.x/y.css", "index.html", files)).toBeNull();
   });
 });
+
+describe("recursos locales guardados como imagen y dirección base", () => {
+  it("usa las imágenes guardadas como data URL, también desde el CSS, y añade <base> a los clones de webs", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    const html = buildPreviewDocument(
+      {
+        "index.html": '<html><head><link rel="stylesheet" href="styles.css"></head><body><img src="recortes/a.png"></body></html>',
+        "styles.css": ".hero{background:url(recortes/a.png)}",
+        "recortes/a.png": png,
+      },
+      { baseUrl: "https://web.example/" },
+    );
+    expect(html).toContain(`<img src="${png}">`);
+    expect(html).toContain(`url(${png})`);
+    expect(html).toContain('<base href="https://web.example/">');
+  });
+});
+
+describe("scripts inyectados en la vista previa", () => {
+  it("son JavaScript válido", () => {
+    const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { baseUrl: "https://a.test/" });
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+    expect(html).toContain("/^https?:\\/\\//i");
+  });
+});
