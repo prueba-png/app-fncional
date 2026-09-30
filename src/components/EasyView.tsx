@@ -90,8 +90,8 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
         {isSharedOrigin()
           ? "Por seguridad, en este enlace la clave solo se recuerda mientras la pestaña esté abierta."
           : "La clave se guarda solo en este navegador."}{" "}
-        El plan gratuito de Google permite muchos clones al día; si se agota, se renueva solo. También sirve una clave gratuita de OpenRouter
-        («sk-or-…»).
+        El plan gratuito de Google permite muchos clones al día y se renueva solo. Consejo: añade también una clave gratuita de OpenRouter en
+        Ajustes («sk-or-…»); si una se agota, la app usará la otra sola, sin que tengas que tocar nada.
       </small>
     </div>
   );

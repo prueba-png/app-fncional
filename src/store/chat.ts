@@ -16,6 +16,30 @@ const HISTORY_TURNS = 12;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const rank = (e: string) => EFFORTS.indexOf(e as (typeof EFFORTS)[number]);
 
+type StreamFn = (req: import("../../shared/types").ChatRequest, onEvent: (e: import("../../shared/types").ChatStreamEvent) => void, signal: AbortSignal) => Promise<void>;
+interface ProviderAttempt {
+  label: string;
+  apiKey?: string;
+  run: StreamFn;
+}
+
+/**
+ * Lista ordenada de IA a probar: primero la elegida, después las demás que tengan clave.
+ * Así, si una agota su cupo gratuito, la app usa otra sin que el usuario tenga que tocar nada.
+ */
+function buildProviderAttempts(studio: ReturnType<typeof useStudio.getState>): ProviderAttempt[] {
+  const s = studio.settings;
+  const order: db.AiProvider[] = [s.aiProvider, ...(["gemini", "openrouter", "anthropic"] as db.AiProvider[]).filter((p) => p !== s.aiProvider)];
+  const out: ProviderAttempt[] = [];
+  for (const p of order) {
+    if (p === "gemini" && s.geminiApiKey) out.push({ label: "Google Gemini", apiKey: s.geminiApiKey, run: streamGemini });
+    else if (p === "openrouter" && s.openrouterApiKey) out.push({ label: "OpenRouter", apiKey: s.openrouterApiKey, run: streamOpenRouter });
+    else if (p === "anthropic" && (s.anthropicApiKey || studio.health?.hasEnvApiKey))
+      out.push({ label: "Anthropic", apiKey: s.anthropicApiKey || undefined, run: studio.ai === "direct" ? streamDirect : streamChat });
+  }
+  return out;
+}
+
 interface SendOptions {
   attachments?: ChatAttachment[];
   attachmentLabels?: string[];
@@ -142,20 +166,11 @@ export const useChat = create<ChatState>((set, get) => ({
         text = result.text;
         model = "Claude (tu cuenta de claude.ai)";
         stopReason = result.truncated ? "max_tokens" : "end_turn";
-      } else await (settings.aiProvider === "gemini" ? streamGemini : settings.aiProvider === "openrouter" ? streamOpenRouter : studio.ai === "direct" ? streamDirect : streamChat)(
-        {
-          apiKey: (settings.aiProvider === "anthropic" ? settings.anthropicApiKey : db.providerKey(settings)) || undefined,
-          model: settings.model,
-          effort: opts.effort && rank(opts.effort) > rank(settings.effort) ? opts.effort : settings.effort,
-          history,
-          prompt: userMsg.content,
-          files: useStudio.getState().project!.files,
-          activeFile: project.activeFile,
-          attachments,
-          mode: opts.mode ?? "edit",
-          webFetch: opts.webFetch,
-        },
-        (e) => {
+      } else {
+        // Se prueban las IA disponibles en orden; si una agota su cupo gratuito, salta sola a la siguiente
+        const attempts = buildProviderAttempts(studio);
+        if (!attempts.length) throw new Error("Conecta la IA gratuita (clave de Google) en Ajustes.");
+        const onEvent = (e: import("../../shared/types").ChatStreamEvent) => {
           if (e.type === "text") {
             text += e.text;
             set({ streamText: text });
@@ -166,9 +181,45 @@ export const useChat = create<ChatState>((set, get) => ({
             usage = e.usage;
             stopReason = e.stopReason;
           }
-        },
-        controller.signal,
-      );
+        };
+        let lastErr: unknown;
+        for (let i = 0; i < attempts.length; i++) {
+          const a = attempts[i];
+          try {
+            text = "";
+            error = undefined;
+            set({ streamText: "" });
+            await a.run(
+              {
+                apiKey: a.apiKey,
+                model: settings.model,
+                effort: opts.effort && rank(opts.effort) > rank(settings.effort) ? opts.effort : settings.effort,
+                history,
+                prompt: userMsg.content,
+                files: useStudio.getState().project!.files,
+                activeFile: project.activeFile,
+                attachments,
+                mode: opts.mode ?? "edit",
+                webFetch: opts.webFetch,
+              },
+              onEvent,
+              controller.signal,
+            );
+            lastErr = undefined;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if ((err as Error).name === "AbortError") throw err;
+            // Solo se salta de servicio si se agotó el cupo y queda otra opción con clave
+            if ((err as Error).name === "QuotaError" && i < attempts.length - 1) {
+              set({ status: `Cambiando a otra IA gratuita (${attempts[i + 1].label})…` });
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (lastErr) throw lastErr;
+      }
     } catch (err) {
       const partial = (err as { partial?: string }).partial;
       if (partial && partial.length > text.length) text = partial;

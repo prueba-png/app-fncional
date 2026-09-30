@@ -122,6 +122,13 @@ async function midStream(emitted: () => number, run: () => Promise<void>) {
   }
 }
 
+/** Cupo gratuito agotado: la app puede saltar a otro servicio automáticamente. */
+function quotaError(message: string): Error {
+  const e = new Error(message);
+  e.name = "QuotaError";
+  return e;
+}
+
 function aborted(): Error {
   const err = new Error("Generación detenida por el usuario.");
   err.name = "AbortError";
@@ -323,9 +330,13 @@ export async function streamGemini(
     throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
   let lastLimit = false;
   let last: unknown;
-  // Los modelos que acaban de agotar su cupo se dejan descansar unos minutos (salvo que no quede otro)
+  // Si todos los modelos agotaron su cupo hace poco, no se reintentan: se avisa ya para saltar a otra IA
   const rested = GEMINI_MODELS.filter((m) => (exhaustedUntil.get(m) ?? 0) < Date.now());
-  for (const model of rested.length ? rested : GEMINI_MODELS) {
+  if (!rested.length)
+    throw quotaError(
+      "El cupo gratuito de Google está agotado por ahora (se renueva solo). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
+    );
+  for (const model of rested) {
     let withUrlTool = !!req.webFetch;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -360,8 +371,8 @@ export async function streamGemini(
     if (!(e instanceof ProviderError) || !e.tryNext) break;
   }
   if (lastLimit)
-    throw new Error(
-      "Has usado el cupo gratuito de Google por ahora (se renueva solo: espera un minuto o, si es el límite diario, hasta mañana). También puedes añadir una clave gratuita de OpenRouter en Ajustes.",
+    throw quotaError(
+      "Has usado el cupo gratuito de Google por ahora (se renueva solo: espera un minuto o, si es el límite diario, hasta mañana). También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
   throw last instanceof Error
     ? last
@@ -569,7 +580,7 @@ export async function streamOpenRouter(
   }
   const e = last as ProviderError;
   if (e?.status === 429)
-    throw new Error(
+    throw quotaError(
       "Has usado el cupo gratuito de OpenRouter por hoy (50 peticiones al día). Vuelve mañana o usa la clave gratuita de Google.",
     );
   throw last instanceof Error

@@ -66,3 +66,11 @@ describe("IA gratuita", () => {
     expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
   });
 });
+
+describe("cupo agotado", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("Gemini lanza QuotaError cuando todos los modelos dan 429", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED" } }), { status: 429 }));
+    await expect(streamGemini(req, () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError" });
+  });
+});

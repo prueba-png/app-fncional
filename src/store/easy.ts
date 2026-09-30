@@ -239,7 +239,7 @@ export const useEasy = create<EasyState>((set, get) => {
    * original, marca en rojo lo que no coincide y la IA lo corrige. Se repite mientras mejore y al final se
    * conserva la versión más parecida. Si algo falla, se queda el resultado que ya había.
    */
-  const refineAgainst = async (ref: db.VisualReference, rounds = 2): Promise<string | undefined> => {
+  const refineAgainst = async (ref: db.VisualReference, rounds = 1): Promise<string | undefined> => {
     const original = ref.full ?? ref.frames[0];
     if (!original || !ref.width || !ref.height) return;
     const viewport = cssViewport(ref.width, ref.height);
