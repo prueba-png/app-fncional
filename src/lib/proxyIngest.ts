@@ -7,7 +7,7 @@
  * Solo se usan con páginas públicas: la URL que se clona pasa por el servicio.
  */
 import type { IngestOptions, IngestResult } from "../../shared/types";
-import { ingestWithFetcher, type TextFetcher } from "../../shared/ingestCore";
+import { ingestWithFetcher, type BinaryFetcher, type TextFetcher } from "../../shared/ingestCore";
 
 interface Relay {
   name: string;
@@ -57,7 +57,31 @@ export const relayFetcher: TextFetcher = async (url, opts) => {
   throw new Error(`No se pudo descargar la web (${(lastError as Error)?.message ?? "sin respuesta"}).`);
 };
 
-/** Clona una web con su código real (HTML y CSS originales) desde el navegador. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** Fuentes: se descargan en binario a través del mismo servicio de reenvío que funcionó. */
+export const relayBinary: BinaryFetcher = async (url, opts) => {
+  const order = [...RELAYS.slice(preferred), ...RELAYS.slice(0, preferred)];
+  let lastError: unknown;
+  for (const relay of order) {
+    try {
+      const res = await fetch(relay.url(url), { signal: AbortSignal.timeout(opts.timeoutMs), credentials: "omit", referrerPolicy: "no-referrer" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (!buf.length || buf.length > opts.maxBytes) throw new Error("tamaño no válido");
+      return { contentType: res.headers.get("content-type") ?? "", base64: toBase64(buf) };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("sin respuesta");
+};
+
+/** Clona una web con su código real (HTML, CSS y fuentes originales) desde el navegador. */
 export function ingestViaRelay(opts: IngestOptions): Promise<IngestResult> {
-  return ingestWithFetcher(relayFetcher, { ...opts, budgetMs: opts.budgetMs ?? 45_000 });
+  return ingestWithFetcher(relayFetcher, { ...opts, budgetMs: opts.budgetMs ?? 45_000 }, relayBinary);
 }

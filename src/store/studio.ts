@@ -51,6 +51,8 @@ interface StudioState {
   settingsOpen: boolean;
   newProjectOpen: boolean;
   helpOpen: boolean;
+  /** Ventana «Base de datos en Telegram» del proyecto actual (con datos precargados opcionales) */
+  telegramDb: { open: boolean; token?: string; chatId?: string };
   pendingAsk: PendingAsk | null;
   ai: AiSource;
   /** Solo con ai = "claude": si esta vista puede enviar imágenes (null = aún no se sabe) */
@@ -67,6 +69,8 @@ interface StudioState {
   setSettingsOpen(open: boolean): void;
   setNewProjectOpen(open: boolean): void;
   setHelpOpen(open: boolean): void;
+  openTelegramDb(prefill?: { token?: string; chatId?: string }): void;
+  closeTelegramDb(): void;
   updateSettings(patch: Partial<Settings>): Promise<void>;
 
   createProject(input: {
@@ -151,6 +155,7 @@ export const useStudio = create<StudioState>((set, get) => {
     settingsOpen: false,
     newProjectOpen: false,
     helpOpen: false,
+    telegramDb: { open: false },
     pendingAsk: null,
     ai: "none",
     webImages: null,
@@ -219,6 +224,12 @@ export const useStudio = create<StudioState>((set, get) => {
     },
     setHelpOpen(open) {
       set({ helpOpen: open });
+    },
+    openTelegramDb(prefill) {
+      set({ telegramDb: { open: true, ...prefill } });
+    },
+    closeTelegramDb() {
+      set({ telegramDb: { open: false } });
     },
     async updateSettings(patch) {
       set({ settings: { ...get().settings, ...patch } });

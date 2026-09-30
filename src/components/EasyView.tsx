@@ -7,6 +7,8 @@ import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
+import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
+import { readTelegramDbConfig } from "../lib/telegramDb";
 import { isSharedOrigin } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { Icon } from "./Icon";
@@ -223,7 +225,7 @@ function StartScreen() {
             </div>
           </div>
           <small className="muted">
-            {precision === "exact" ? "Máxima: la copia más fiel, tarda de 3 a 7 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
+            {precision === "exact" ? "Máxima: la copia más fiel (la IA compara su resultado con tu captura y corrige las diferencias), tarda de 2 a 4 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
             ZIP se abren tal cual.
           </small>
         </section>
@@ -321,7 +323,7 @@ function WorkingScreen() {
               </div>
             )}
             <small className="muted">
-              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 7 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
+              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 2 a 4 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
             </small>
           </div>
         )}
@@ -383,6 +385,7 @@ function ResultScreen() {
   const canUseAi = useStudio((s) => aiAvailable(s));
   const missingKey = useStudio((s) => needsApiKey(s));
   const canDownload = useStudio((s) => s.canDownload);
+  const dbConnected = useStudio((s) => Boolean(s.project && readTelegramDbConfig(s.project.files)));
   const [change, setChange] = useState("");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
   const [showKey, setShowKey] = useState(false);
@@ -398,9 +401,14 @@ function ResultScreen() {
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
-  const applyChange = () => {
+  const applyChange = async () => {
     const text = change.trim();
     if (!text || streaming) return;
+    // «Conecta este proyecto con la base de datos de Telegram…» no va a la IA: se conecta directamente
+    if (await handleTelegramDbCommand(text)) {
+      setChange("");
+      return;
+    }
     if (missingKey) {
       setShowKey(true);
       return;
@@ -457,6 +465,14 @@ function ResultScreen() {
           <button className="btn" aria-label="Descargar" onClick={() => void download()} disabled={busy === "zip" || !canDownload} title={canDownload ? "Descargar el código" : "Esta vista no permite descargar ficheros"}>
             {busy === "zip" ? <span className="spinner" /> : <Icon name="download" />} <span className="label">Descargar</span>
           </button>
+          <button
+            className={`btn${dbConnected ? " connected" : ""}`}
+            aria-label="Base de datos"
+            onClick={() => useStudio.getState().openTelegramDb()}
+            title={dbConnected ? "Conectado: los formularios envían sus datos a tu Telegram" : "Recibir en Telegram lo que la gente envíe en los formularios"}
+          >
+            <Icon name="database" /> <span className="label">{dbConnected ? "Datos ✓" : "Datos"}</span>
+          </button>
           <button className="btn" aria-label="Guardar en Telegram" onClick={() => void saveTelegram()} disabled={busy === "tg"} title="Guardar una copia en tu Telegram">
             {busy === "tg" ? <span className="spinner" /> : <Icon name="cloud" />} <span className="label">Telegram</span>
           </button>
@@ -502,7 +518,7 @@ function ResultScreen() {
             placeholder="¿Quieres cambiar algo? Ej.: «pon el botón en verde» o «añade un formulario de contacto»"
             value={change}
             onChange={(e) => setChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && applyChange()}
+            onKeyDown={(e) => e.key === "Enter" && void applyChange()}
             disabled={streaming}
             aria-label="Describe el cambio que quieres"
           />
@@ -511,7 +527,7 @@ function ResultScreen() {
               <Icon name="stop" /> <span className="label">Detener</span>
             </button>
           ) : (
-            <button className="btn primary big" aria-label="Aplicar cambio" onClick={applyChange} disabled={!change.trim()}>
+            <button className="btn primary big" aria-label="Aplicar cambio" onClick={() => void applyChange()} disabled={!change.trim()}>
               <Icon name="send" /> <span className="label">Aplicar</span>
             </button>
           )}

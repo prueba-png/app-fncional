@@ -13,6 +13,7 @@ const EASY: Entry[] = [
   { icon: "upload", name: "Sube o arrastra aquí", what: "Elige una captura, un vídeo, un PDF o un SVG y la IA crea la página igual. Los HTML y ZIP se abren tal cual." },
   { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones»." },
   { icon: "download", name: "Descargar", what: "Guarda el código del clon en tu dispositivo como archivo ZIP." },
+  { icon: "database", name: "Datos", what: "Conecta el proyecto con tu bot de Telegram: lo que la gente envíe en los formularios te llega al chat. También puedes escribir «conecta este proyecto con la base de datos de Telegram» con el token y el ID." },
   { icon: "cloud", name: "Telegram", what: "Envía una copia de seguridad del clon a tu chat de Telegram (se configura en Ajustes)." },
   { icon: "terminal", name: "Ver código", what: "Abre el modo avanzado para ver y editar el código a mano." },
   { icon: "monitor", name: "Ordenador / tablet / móvil", what: "Cambia el tamaño de la vista previa para ver cómo queda en cada pantalla." },

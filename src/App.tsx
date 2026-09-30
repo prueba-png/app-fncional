@@ -11,6 +11,7 @@ import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Toasts } from "./components/Toasts";
 import { AskDialog } from "./components/AskDialog";
 import { HelpDialog } from "./components/HelpDialog";
+import { TelegramDbDialog } from "./components/TelegramDbDialog";
 import { useAutoBackup } from "./hooks/useAutoBackup";
 import { useEasy } from "./store/easy";
 import { EasyView } from "./components/EasyView";
@@ -115,6 +116,7 @@ export function App() {
       <NewProjectDialog />
       <AskDialog />
       <HelpDialog />
+      <TelegramDbDialog />
       <Toasts />
     </div>
   );

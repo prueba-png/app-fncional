@@ -6,6 +6,7 @@ import { backupToTelegram, restoreFromTelegram, telegramReady } from "../lib/bac
 import { formatBytes, timeAgo } from "../lib/util";
 import { Icon } from "./Icon";
 import { ServerNotice } from "./ServerNotice";
+import { readTelegramDbConfig } from "../lib/telegramDb";
 
 export function TelegramPanel() {
   const settings = useStudio((s) => s.settings);
@@ -49,6 +50,17 @@ export function TelegramPanel() {
   return (
     <div className="tool-body">
       <ServerNotice feature="la sincronización con Telegram" worksServerless />
+      <div className="card" style={{ marginBottom: 12, display: "grid", gap: 8 }}>
+        <div className="row">
+          <Icon name="database" size={18} />
+          <b className="grow">Base de datos del proyecto</b>
+          {project && readTelegramDbConfig(project.files) && <span className="badge success">conectado</span>}
+        </div>
+        <div className="small muted">Recibe en Telegram lo que la gente envíe en los formularios de este proyecto.</div>
+        <button className="btn" style={{ justifyContent: "center" }} onClick={() => useStudio.getState().openTelegramDb()} disabled={!project}>
+          <Icon name="database" /> {project && readTelegramDbConfig(project.files) ? "Ver o cambiar conexión" : "Conectar con Telegram"}
+        </button>
+      </div>
       <div className="card">
         <div className="row">
           <Icon name="cloud" size={20} />

@@ -18,6 +18,60 @@ export interface FetchedText {
 }
 /** Descarga un recurso como texto. Lanza un error si no se puede obtener. */
 export type TextFetcher = (url: string, opts: { accept: string; timeoutMs: number; maxBytes: number }) => Promise<FetchedText>;
+/** Descarga un recurso binario (fuentes) y lo devuelve en base64. */
+export type BinaryFetcher = (url: string, opts: { timeoutMs: number; maxBytes: number }) => Promise<{ contentType: string; base64: string }>;
+
+const MAX_FONTS = 12;
+const MAX_FONT_BYTES = 1.5 * 1024 * 1024;
+const MAX_FONTS_TOTAL = 5 * 1024 * 1024;
+const FONT_MIME: Record<string, string> = { woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf" };
+
+/**
+ * Incrusta como data: URL las fuentes de los @font-face. Muchas webs no permiten usar sus fuentes
+ * desde otro dominio, así que sin esto el clon se vería con otra tipografía.
+ */
+export async function inlineFonts(css: string, fetchBinary: BinaryFetcher, warnings: string[], deadline: number): Promise<string> {
+  const urls = new Set<string>();
+  for (const block of css.match(/@font-face\s*\{[^}]*\}/gi) ?? []) {
+    for (const m of block.matchAll(/url\(\s*(['"]?)(https?:[^'")]+)\1\s*\)/gi)) {
+      if (/\.(woff2?|ttf|otf)(\?|#|$)/i.test(m[2])) urls.add(m[2]);
+    }
+  }
+  // Primero woff2 (más ligero); se limita el número y el tamaño total
+  const list = [...urls].sort((a, b) => Number(!/\.woff2/i.test(a)) - Number(!/\.woff2/i.test(b))).slice(0, MAX_FONTS);
+  let total = 0;
+  const results = await Promise.all(
+    list.map(async (url) => {
+      const remaining = deadline - Date.now();
+      if (remaining < 800) return null;
+      try {
+        const res = await fetchBinary(url, { timeoutMs: Math.min(10_000, remaining), maxBytes: MAX_FONT_BYTES });
+        return { url, ...res };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  let out = css;
+  let skipped = 0;
+  for (const r of results) {
+    if (!r) {
+      skipped++;
+      continue;
+    }
+    const bytes = Math.floor((r.base64.length * 3) / 4);
+    if (total + bytes > MAX_FONTS_TOTAL) {
+      skipped++;
+      continue;
+    }
+    total += bytes;
+    const ext = r.url.split(/[?#]/)[0].split(".").pop()!.toLowerCase();
+    const mime = /font|octet/.test(r.contentType) && !/octet/.test(r.contentType) ? r.contentType.split(";")[0] : FONT_MIME[ext] ?? "font/woff2";
+    out = out.split(r.url).join(`data:${mime};base64,${r.base64}`);
+  }
+  if (skipped) warnings.push(`${skipped} fuente(s) no se pudieron copiar; se verán con una tipografía parecida.`);
+  return out;
+}
 
 const MAX_STYLESHEETS = 15;
 const MAX_IMPORT_DEPTH = 2;
@@ -95,7 +149,7 @@ function formatHtml(html: string): string {
   return html.replace(/\n\s*\n\s*\n+/g, "\n\n").trim() + "\n";
 }
 
-export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOptions): Promise<IngestResult> {
+export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOptions, fetchBinary?: BinaryFetcher): Promise<IngestResult> {
   const { keepScripts = false, inlineStylesheets = true, budgetMs = 60_000 } = opts;
   const deadline = Date.now() + budgetMs;
   const warnings: string[] = [];
@@ -192,7 +246,8 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
     }
   }
   const cssParts = await Promise.all(partPromises);
-  const stylesCss = cssParts.join("\n\n");
+  let stylesCss = cssParts.join("\n\n");
+  if (fetchBinary && inlineStylesheets) stylesCss = await inlineFonts(stylesCss, fetchBinary, warnings, deadline - 500);
   for (const m of stylesCss.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) addAsset(m[1], "css url()");
 
   // --- scripts ---

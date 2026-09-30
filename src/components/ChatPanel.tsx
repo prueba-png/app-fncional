@@ -5,6 +5,7 @@ import { useStudio } from "../store/studio";
 import type { ChatMessage } from "../db/db";
 import { Icon } from "./Icon";
 import { ServerNotice } from "./ServerNotice";
+import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 
 const SUGGESTIONS = [
   "Añade un formulario de contacto accesible con validación",
@@ -90,10 +91,11 @@ export function ChatPanel() {
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 140) el.scrollTop = el.scrollHeight;
   }, [streamText]);
 
-  const submit = () => {
+  const submit = async () => {
     const text = input.trim();
     if (!text || streaming) return;
     setInput("");
+    if (await handleTelegramDbCommand(text)) return;
     void send(text);
   };
 
@@ -167,7 +169,7 @@ export function ChatPanel() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              submit();
+              void submit();
             }
           }}
           aria-label="Mensaje para el asistente"
@@ -194,7 +196,7 @@ export function ChatPanel() {
               <Icon name="stop" /> Detener
             </button>
           ) : (
-            <button className="btn primary" onClick={submit} disabled={!input.trim()}>
+            <button className="btn primary" onClick={() => void submit()} disabled={!input.trim()}>
               <Icon name="send" /> Enviar
             </button>
           )}

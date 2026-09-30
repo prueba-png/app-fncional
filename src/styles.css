@@ -368,3 +368,14 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
 
 .precision { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .precision .seg button { padding: 6px 14px; font-size: 13px; }
+
+.btn.connected { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); color: var(--success); }
+
+@media (max-width: 760px) {
+  /* Nombre del clon en su propia fila y los botones debajo, todos visibles */
+  .result-bar { flex-wrap: wrap; row-gap: 6px; }
+  .result-title { order: -1; flex-basis: 100%; }
+  .result-bar > .btn { flex: 1 1 0; }
+  .result-actions { flex: 4 1 0; }
+  .result-actions .btn { flex: 1 1 0; min-width: 0; }
+}
