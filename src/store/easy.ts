@@ -30,7 +30,7 @@ export interface Step {
 }
 
 export interface Job {
-  kind: "url" | "files";
+  kind: "url" | "files" | "prompt";
   title: string;
   steps: Step[];
   /** Mensaje de error comprensible para el usuario */
@@ -75,6 +75,8 @@ interface EasyState {
   /** «Afinar más»: desde la pantalla de resultado, otra ronda de comparación con la captura original */
   refining: boolean;
   refineMore(projectId: string): Promise<void>;
+  /** Crear desde cero: la IA construye exactamente lo que describas, sin partir de ninguna captura ni enlace */
+  createFromPrompt(prompt: string): Promise<void>;
 }
 
 const MODE_KEY = "devstudio:mode";
@@ -93,7 +95,11 @@ const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
 const MAX_DOC_CHARS = 60_000;
 
 let abortController: AbortController | null = null;
-let lastInput: { kind: "url"; url: string; instruction?: string } | { kind: "files"; files: File[]; instruction?: string } | null = null;
+let lastInput:
+  | { kind: "url"; url: string; instruction?: string }
+  | { kind: "files"; files: File[]; instruction?: string }
+  | { kind: "prompt"; prompt: string }
+  | null = null;
 /** Referencias ya procesadas a la espera de la descripción del usuario (plan B) */
 let pendingDescribe: { projectId: string; refs: db.VisualReference[]; extra: ChatAttachment[]; labels: string[] } | null = null;
 
@@ -219,7 +225,7 @@ export const useEasy = create<EasyState>((set, get) => {
     prompt: string,
     attachments: ChatAttachment[],
     labels: string[],
-    extra: { webFetch?: boolean; note?: string; refine?: () => Promise<string | undefined> } = {},
+    extra: { webFetch?: boolean; note?: string; refine?: () => Promise<string | undefined>; mode?: "edit" | "generate-from-reference" } = {},
   ) => {
     advance(1);
     const unsubscribe = useChat.subscribe((s) => {
@@ -230,7 +236,7 @@ export const useEasy = create<EasyState>((set, get) => {
       await useChat.getState().send(prompt, {
         attachments,
         attachmentLabels: labels,
-        mode: "generate-from-reference",
+        mode: extra.mode ?? "generate-from-reference",
         webFetch: extra.webFetch,
       });
     } finally {
@@ -402,7 +408,8 @@ export const useEasy = create<EasyState>((set, get) => {
       const input = lastInput;
       if (!input) return;
       if (input.kind === "url") await get().cloneUrl(input.url, input.instruction);
-      else await get().cloneFiles(input.files, input.instruction);
+      else if (input.kind === "files") await get().cloneFiles(input.files, input.instruction);
+      else await get().createFromPrompt(input.prompt);
     },
 
     async cloneUrl(raw, instruction) {
@@ -748,6 +755,59 @@ Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiem
         ];
         await runAi(DESCRIBE_PROMPT, attachments, pending.labels);
         if (get().stage === "result") pendingDescribe = null;
+      } catch (err) {
+        fail(friendlyAiError((err as Error).message));
+      }
+    },
+
+    async createFromPrompt(prompt) {
+      const text = prompt.trim();
+      if (!text) return;
+      lastInput = { kind: "prompt", prompt: text };
+      pendingDescribe = null;
+      abortController = new AbortController();
+      const studio = useStudio.getState();
+      const title = text.length > 60 ? `${text.slice(0, 57)}…` : text;
+
+      set({
+        stage: "working",
+        job: {
+          kind: "prompt",
+          title: "Creando desde cero",
+          usesAi: true,
+          steps: [
+            { label: "Entendiendo lo que pides", state: "active" },
+            { label: "Construyendo la página", state: "pending" },
+            { label: "Preparando la vista previa", state: "pending" },
+          ],
+        },
+      });
+      if (needsApiKey(studio)) {
+        fail("Para crear algo desde cero hace falta conectar la IA (solo una vez).", { needsKey: true });
+        return;
+      }
+      if (!aiAvailable(studio)) {
+        fail("La IA no está disponible aquí. Abre esta página desde claude.ai o usa la app en tu ordenador (npm run dev).");
+        return;
+      }
+      try {
+        await studio.createProject({
+          name: title.replace(/[.!?]+$/, "").slice(0, 60) || "Proyecto nuevo",
+          files: { "index.html": "", "styles.css": "", "script.js": "" },
+          origin: { type: "blank", detail: text },
+        });
+        await runAi(
+          `Crea EXACTAMENTE lo que te pide el usuario, ni más ni menos, sin añadir secciones o funciones que no haya pedido:
+${text}
+
+- Interpreta la petición de forma literal: si detalla textos, colores, secciones o un orden concreto, respétalo tal cual.
+- Si algo queda ambiguo, elige la interpretación más razonable y dilo en una frase, pero no inventes funciones extra no pedidas.
+- Crea una página completa y funcional: index.html, styles.css y script.js, con HTML semántico y accesible, responsive.
+- Usa contenido de ejemplo realista donde el usuario no haya dado datos concretos.`,
+          [],
+          [],
+          { mode: "edit" },
+        );
       } catch (err) {
         fail(friendlyAiError((err as Error).message));
       }

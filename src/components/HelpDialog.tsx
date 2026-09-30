@@ -11,6 +11,7 @@ interface Entry {
 const EASY: Entry[] = [
   { icon: "globe", name: "Clonar (enlace)", what: "Pega la dirección de una web y pulsa Clonar. Se copia su código real (textos, estilos e imágenes)." },
   { icon: "upload", name: "Sube o arrastra aquí", what: "Elige una captura, un vídeo, un PDF o un SVG y la IA crea la página igual. Los HTML y ZIP se abren tal cual." },
+  { icon: "sparkles", name: "Crear algo nuevo desde cero", what: "Describe con tus palabras lo que quieres (secciones, colores, textos) y la IA construye exactamente eso, sin partir de ninguna captura ni enlace." },
   { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones», con una miniatura, para renombrar o eliminar." },
   { icon: "external", name: "Publicar", what: "Envuelve todo el proyecto en un solo archivo HTML y te deja copiarlo o descargarlo para subirlo a Netlify, GitHub Pages, etc." },
   { icon: "download", name: "Descargar", what: "Guarda el código del clon en tu dispositivo como archivo ZIP." },

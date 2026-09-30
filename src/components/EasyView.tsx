@@ -100,8 +100,14 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
 }
 
 /* ── Pantalla de inicio ────────────────────────────────────────── */
+const PROMPT_EXAMPLES = [
+  "Una landing para una cafetería de especialidad, con menú, horario y mapa",
+  "Un portfolio personal de fotógrafo, en tonos oscuros, con galería y contacto",
+  "Una página de aterrizaje para una app de fitness, con precios y testimonios",
+];
+
 function StartScreen() {
-  const { askUrl, askFiles, openResult } = useEasy.getState();
+  const { askUrl, askFiles, openResult, createFromPrompt } = useEasy.getState();
   const projects = useStudio((s) => s.projects);
   const health = useStudio((s) => s.health);
   const ai = useStudio((s) => s.ai);
@@ -113,11 +119,15 @@ function StartScreen() {
   const setPrecision = useEasy((s) => s.setPrecision);
   const [url, setUrl] = useState("");
   const [over, setOver] = useState(false);
+  const [prompt, setPrompt] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const startUrl = (value = url) => {
     if (normalizeUrl(value)) askUrl(value);
     else useStudio.getState().toast("Escribe una dirección web, por ejemplo «ejemplo.com».", "error");
+  };
+  const startPrompt = () => {
+    if (prompt.trim()) void createFromPrompt(prompt);
   };
 
   return (
@@ -135,8 +145,8 @@ function StartScreen() {
       }}
     >
       <header className="easy-hero">
-        <h1>¿Qué quieres clonar?</h1>
-        <p className="muted">Pega el enlace de una web o sube una captura, un vídeo o un archivo. La vista previa aparece sola.</p>
+        <h1>¿Qué quieres clonar o crear?</h1>
+        <p className="muted">Pega el enlace de una web, sube una captura o un vídeo, o descríbele a la IA algo nuevo desde cero. La vista previa aparece sola.</p>
       </header>
 
       {!health && ai === "claude" && webImages === false && (
@@ -242,6 +252,42 @@ function StartScreen() {
             ZIP se abren tal cual.
           </small>
         </section>
+
+        <section className="easy-card" aria-labelledby="create-prompt-title">
+          <div className="easy-card-head">
+            <Icon name="sparkles" size={18} />
+            <b id="create-prompt-title">Crear algo nuevo desde cero</b>
+          </div>
+          <textarea
+            id="easy-prompt"
+            className="textarea"
+            placeholder="Describe lo que quieres crear. Ej.: «una landing para una cafetería, con menú, horario y mapa, en tonos cálidos»"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                startPrompt();
+              }
+            }}
+            aria-label="Describe lo que quieres crear"
+            rows={3}
+          />
+          <div className="suggestions">
+            {PROMPT_EXAMPLES.map((ex) => (
+              <button key={ex} className="suggestion" onClick={() => setPrompt(ex)}>
+                {ex}
+              </button>
+            ))}
+          </div>
+          <div className="row">
+            <div className="grow" />
+            <button className="btn primary big" onClick={startPrompt} disabled={!prompt.trim()}>
+              <Icon name="sparkles" size={14} /> Crear
+            </button>
+          </div>
+          <small className="muted">La IA construye exactamente lo que describas: cuanto más detalle des (secciones, colores, textos), más fiel será el resultado.</small>
+        </section>
       </div>
 
       {showKeyCard ? (
@@ -275,7 +321,7 @@ function StartScreen() {
   );
 }
 
-const ORIGIN_ICON: Record<string, "globe" | "image" | "folder"> = { url: "globe", reference: "image" };
+const ORIGIN_ICON: Record<string, "globe" | "image" | "folder" | "sparkles"> = { url: "globe", reference: "image", blank: "sparkles" };
 
 /** Tarjeta de un clon anterior: miniatura, nombre, y renombrar/eliminar sin salir de la lista. */
 function RecentCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
@@ -495,7 +541,9 @@ function WorkingScreen() {
               </div>
             )}
             <small className="muted">
-              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 6 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
+              Tiempo: {formatElapsed(elapsed)} ·{" "}
+              {job.kind === "prompt" ? "suele tardar 1 o 2 minutos" : useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 6 minutos" : "suele tardar 1 o 2 minutos"}. Puedes
+              dejar esta pantalla abierta.
             </small>
           </div>
         )}
