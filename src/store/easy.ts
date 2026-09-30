@@ -72,6 +72,9 @@ interface EasyState {
   cloneFromDescription(description: string): Promise<void>;
   retry(): Promise<void>;
   cancel(): void;
+  /** «Afinar más»: desde la pantalla de resultado, otra ronda de comparación con la captura original */
+  refining: boolean;
+  refineMore(projectId: string): Promise<void>;
 }
 
 const MODE_KEY = "devstudio:mode";
@@ -163,6 +166,21 @@ function describeRefs(refs: db.VisualReference[]): string {
     .join("\n");
 }
 
+/**
+ * Genera una miniatura pequeña del resultado para la galería «Tus clones». Se hace en segundo plano
+ * (no bloquea el resultado) y, si falla, no pasa nada: el proyecto se queda sin miniatura.
+ */
+function scheduleThumbnail(projectId: string, files: FileMap, viewport: { width: number; height: number }): void {
+  renderSnapshot(files, viewport, { maxWidth: 320, timeoutMs: 12_000 })
+    .then((dataUrl) => {
+      // Solo se guarda si el proyecto sigue existiendo (pudo borrarse o cambiar mientras tanto)
+      if (useStudio.getState().project?.id === projectId) useStudio.getState().patchProject({ thumbnail: dataUrl });
+    })
+    .catch(() => {
+      /* sin miniatura: no es grave */
+    });
+}
+
 export const useEasy = create<EasyState>((set, get) => {
   const setSteps = (update: (steps: Step[]) => Step[]) => {
     const job = get().job;
@@ -179,7 +197,8 @@ export const useEasy = create<EasyState>((set, get) => {
     });
   };
   const finish = (note?: string) => {
-    const id = useStudio.getState().project?.id;
+    const project = useStudio.getState().project;
+    const id = project?.id;
     const notes = { ...get().notes };
     if (id) {
       if (note) notes[id] = note;
@@ -187,6 +206,12 @@ export const useEasy = create<EasyState>((set, get) => {
     }
     setSteps((steps) => steps.map((s) => ({ ...s, state: "done" })));
     set({ stage: "result", notes });
+    // Miniatura para la galería «Tus clones» (en segundo plano; si falla, no pasa nada)
+    if (id && project && !project.thumbnail && Object.values(project.files).some((c) => c.trim())) {
+      const w = project.viewport === "mobile" ? 390 : project.viewport === "tablet" ? 820 : 1280;
+      const h = project.viewport === "mobile" ? 844 : project.viewport === "tablet" ? 1180 : 800;
+      scheduleThumbnail(id, project.files, { width: w, height: h });
+    }
   };
 
   /** Envía la petición a la IA y termina el trabajo con la vista previa o un error comprensible */
@@ -239,7 +264,14 @@ export const useEasy = create<EasyState>((set, get) => {
    * original, marca en rojo lo que no coincide y la IA lo corrige. Se repite mientras mejore y al final se
    * conserva la versión más parecida. Si algo falla, se queda el resultado que ya había.
    */
-  const refineAgainst = async (ref: db.VisualReference, rounds = 1): Promise<string | undefined> => {
+  const refineAgainst = async (
+    ref: db.VisualReference,
+    rounds = 1,
+    opts: { guard?: () => boolean; onLabel?: (text: string) => void } = {},
+  ): Promise<string | undefined> => {
+    const guard = opts.guard ?? (() => get().stage === "working");
+    const onLabel =
+      opts.onLabel ?? ((text: string) => setSteps((steps) => steps.map((st, i) => (i === 3 && st.label.startsWith("Comparando") ? { ...st, label: text } : st))));
     const original = ref.full ?? ref.frames[0];
     if (!original || !ref.width || !ref.height) return;
     const viewport = cssViewport(ref.width, ref.height);
@@ -248,8 +280,6 @@ export const useEasy = create<EasyState>((set, get) => {
       const shot = await renderSnapshot(files, viewport);
       return { files, cmp: await compareImages(original, shot) };
     };
-    const label = (text: string) =>
-      setSteps((steps) => steps.map((st, i) => (i === 3 && st.label.startsWith("Comparando") ? { ...st, label: text } : st)));
 
     let current: Awaited<ReturnType<typeof measure>>;
     try {
@@ -260,8 +290,8 @@ export const useEasy = create<EasyState>((set, get) => {
     }
     let best = { files: current.files, score: current.cmp.score };
     for (let round = 1; round <= rounds; round++) {
-      if (get().stage !== "working" || best.score >= 0.985) break;
-      label(`Comparando con tu captura y corrigiendo diferencias (ronda ${round}/${rounds} · parecido ${Math.round(current.cmp.score * 100)} %)`);
+      if (!guard() || best.score >= 0.985) break;
+      onLabel(`Comparando con tu captura y corrigiendo diferencias (ronda ${round}/${rounds} · parecido ${Math.round(current.cmp.score * 100)} %)`);
       const attachments: ChatAttachment[] = current.cmp.composites.map((c, i) => {
         const { mediaType, data } = dataUrlParts(c);
         return { type: "image", mediaType: mediaType as "image/jpeg", data, label: `Comparación ${i + 1}/${current.cmp.composites.length}` };
@@ -275,7 +305,7 @@ export const useEasy = create<EasyState>((set, get) => {
         attachmentLabels: [`${ref.name} (comparación ${round})`],
         mode: "generate-from-reference",
       });
-      if (get().stage !== "working") return;
+      if (!guard()) return;
       if (useChat.getState().messages.at(-1)?.meta?.error) break;
       const before = best.score;
       try {
@@ -311,6 +341,7 @@ export const useEasy = create<EasyState>((set, get) => {
     job: null,
     notes: {},
     pending: null,
+    refining: false,
 
     askFiles(files) {
       if (!files.length) return;
@@ -719,6 +750,34 @@ Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiem
         if (get().stage === "result") pendingDescribe = null;
       } catch (err) {
         fail(friendlyAiError((err as Error).message));
+      }
+    },
+
+    async refineMore(projectId) {
+      const studio = useStudio.getState();
+      if (get().refining || useChat.getState().streaming) return;
+      if (!aiAvailable(studio)) {
+        studio.toast("Conecta la IA gratuita (clave de Google) en Ajustes.", "error");
+        return;
+      }
+      set({ refining: true });
+      try {
+        const refs = await db.listReferences(projectId);
+        const target = refs.find((r) => (r.kind === "image" || r.kind === "video") && r.frames.length && r.width && r.height);
+        if (!target) {
+          studio.toast("Este clon no tiene una captura original con la que comparar.", "info");
+          return;
+        }
+        const note = await refineAgainst(target, 1, { guard: () => get().refining, onLabel: (text) => studio.toast(text, "info") });
+        if (note) {
+          const notes = { ...get().notes, [projectId]: note };
+          set({ notes });
+        }
+        studio.toast("Comparación terminada", "success");
+      } catch (err) {
+        studio.toast(friendlyAiError((err as Error).message), "error");
+      } finally {
+        set({ refining: false });
       }
     },
   };

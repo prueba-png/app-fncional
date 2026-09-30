@@ -20,6 +20,8 @@ export interface Project {
   autoInjectDeps: boolean;
   /** Pantalla con la que se abre la vista previa (la de la captura original o «ordenador» para webs) */
   viewport?: "desktop" | "tablet" | "mobile";
+  /** Miniatura pequeña (data URL) para la galería «Tus clones»; se genera al crear el proyecto, sin garantías */
+  thumbnail?: string;
 }
 
 export type VersionSource = "create" | "manual" | "ai" | "ingest" | "rollback" | "dependency" | "restore";

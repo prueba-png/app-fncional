@@ -13,6 +13,7 @@ import { processReferenceFile } from "../lib/media";
 import { MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
 import * as db from "../db/db";
 import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
+import type { Project } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { ExportDialog } from "./ExportDialog";
 import { Icon } from "./Icon";
@@ -263,18 +264,91 @@ function StartScreen() {
           <h2 id="recent-title">Tus clones</h2>
           <div className="recent-grid">
             {projects.slice(0, 12).map((p) => (
-              <button key={p.id} className="recent" onClick={() => void openResult(p.id)}>
-                <Icon name={p.origin.type === "url" ? "globe" : p.origin.type === "reference" ? "image" : "folder"} size={18} />
-                <span className="recent-text">
-                  <span className="recent-name">{p.name}</span>
-                  <span className="muted small">{timeAgo(p.updatedAt)}</span>
-                </span>
-              </button>
+              <RecentCard key={p.id} project={p} onOpen={() => void openResult(p.id)} />
             ))}
           </div>
         </section>
       )}
       {over && <div className="drop-overlay">Suelta el archivo para clonarlo</div>}
+    </div>
+  );
+}
+
+const ORIGIN_ICON: Record<string, "globe" | "image" | "folder"> = { url: "globe", reference: "image" };
+
+/** Tarjeta de un clon anterior: miniatura, nombre, y renombrar/eliminar sin salir de la lista. */
+function RecentCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
+  const { renameProject, deleteProject, ask, toast } = useStudio.getState();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(project.name);
+
+  return (
+    <div className="recent">
+      <button className="recent-main" onClick={onOpen} aria-label={`Abrir ${project.name}`}>
+        {project.thumbnail ? (
+          <img className="recent-thumb" src={project.thumbnail} alt="" />
+        ) : (
+          <span className="recent-thumb recent-thumb-icon">
+            <Icon name={ORIGIN_ICON[project.origin.type] ?? "folder"} size={20} />
+          </span>
+        )}
+        <span className="recent-text">
+          {editing ? (
+            <input
+              className="input"
+              autoFocus
+              value={draft}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => {
+                if (draft.trim()) void renameProject(project.id, draft.trim());
+                setEditing(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setEditing(false);
+              }}
+            />
+          ) : (
+            <>
+              <span className="recent-name">{project.name}</span>
+              <span className="muted small">{timeAgo(project.updatedAt)}</span>
+            </>
+          )}
+        </span>
+      </button>
+      <div className="recent-actions" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="btn sm icon ghost"
+          title="Renombrar"
+          aria-label={`Renombrar ${project.name}`}
+          onClick={() => {
+            setDraft(project.name);
+            setEditing(true);
+          }}
+        >
+          <Icon name="edit" size={13} />
+        </button>
+        <button
+          className="btn sm icon ghost danger"
+          title="Eliminar"
+          aria-label={`Eliminar ${project.name}`}
+          onClick={async () => {
+            const ok = await ask({
+              title: `Eliminar «${project.name}»`,
+              message: "Se borrarán también su historial, su conversación y sus referencias. Esta acción no se puede deshacer.",
+              confirmLabel: "Eliminar",
+              danger: true,
+            });
+            if (ok !== null) {
+              await deleteProject(project.id);
+              toast("Clon eliminado", "success");
+            }
+          }}
+        >
+          <Icon name="trash" size={13} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -477,7 +551,8 @@ function ResultScreen() {
   const versions = useStudio((s) => s.versions);
   const note = useEasy((s) => (project ? s.notes[project.id] : undefined));
   const [hiddenNote, setHiddenNote] = useState("");
-  const { goHome, setMode } = useEasy.getState();
+  const { goHome, setMode, refineMore } = useEasy.getState();
+  const refining = useEasy((s) => s.refining);
   const { toast, restoreVersion, setSettingsOpen } = useStudio.getState();
   const { streaming, messages } = useChat();
   const canUseAi = useStudio((s) => aiAvailable(s));
@@ -660,6 +735,19 @@ function ResultScreen() {
             Escribe aquí lo que quieras cambiar de lo clonado, o pulsa <Icon name="image" size={12} /> para añadir otra imagen (por ejemplo:
             «primero muestra esta imagen, haz un splash y luego esta otra»).
           </p>
+        )}
+        {project.origin.type === "reference" && (
+          <div className="row wrap small refine-row">
+            <button
+              className="btn sm"
+              disabled={refining || streaming}
+              onClick={() => void refineMore(project.id)}
+              title="Vuelve a comparar el resultado con tu captura original y corrige lo que no coincida"
+            >
+              {refining ? <span className="spinner" /> : <Icon name="sparkles" size={12} />} Afinar más
+            </button>
+            <span className="muted small">Compara de nuevo con tu captura original y corrige diferencias.</span>
+          </div>
         )}
         {extraImages.length > 0 && (
           <div className="foot attach-list">

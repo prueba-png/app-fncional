@@ -32,6 +32,9 @@ const PATHS = {
   shrink: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
   external: "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6",
   database: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+  sun: "M12 4V2M12 22v-2M4.9 4.9L3.5 3.5M20.5 20.5l-1.4-1.4M4 12H2M22 12h-2M4.9 19.1l-1.4 1.4M20.5 3.5l-1.4 1.4M12 17a5 5 0 100-10 5 5 0 000 10z",
+  moon: "M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z",
+  translate: "M3 5h9M7.5 3v2M4 15c3-1 6-4 7-9M11 12c-1 3-4 6-7 7M13 20l4-9 4 9M14.5 17h5",
 } as const;
 
 export type IconName = keyof typeof PATHS;

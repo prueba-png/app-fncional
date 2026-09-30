@@ -4,6 +4,7 @@ import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { slugify } from "../lib/util";
 import { saveFile } from "../lib/runtime";
+import { getTheme, setTheme, type Theme } from "../lib/theme";
 import { Icon } from "./Icon";
 import { useEasy } from "../store/easy";
 
@@ -16,8 +17,15 @@ export function TopBar() {
   const canDownload = useStudio((s) => s.canDownload);
   const [name, setName] = useState(project?.name ?? "");
   const [busy, setBusy] = useState<"" | "zip" | "tg">("");
+  const [theme, setThemeState] = useState<Theme>(getTheme());
 
   useEffect(() => setName(project?.name ?? ""), [project?.id, project?.name]);
+
+  const toggleTheme = () => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    setThemeState(next);
+  };
 
   const logo = (
     <button className="logo" onClick={() => mode === "easy" && useEasy.getState().goHome()} aria-label="DevStudio Pro, ir al inicio">
@@ -39,6 +47,14 @@ export function TopBar() {
   );
   const settingsButton = (
     <>
+      <button
+        className="btn icon"
+        onClick={toggleTheme}
+        title={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+        aria-label={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"} />
+      </button>
       <button className="btn icon help-btn" onClick={() => useStudio.getState().setHelpOpen(true)} title="Ayuda: qué hace cada botón" aria-label="Ayuda">
         ?
       </button>

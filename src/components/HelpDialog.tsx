@@ -11,7 +11,7 @@ interface Entry {
 const EASY: Entry[] = [
   { icon: "globe", name: "Clonar (enlace)", what: "Pega la dirección de una web y pulsa Clonar. Se copia su código real (textos, estilos e imágenes)." },
   { icon: "upload", name: "Sube o arrastra aquí", what: "Elige una captura, un vídeo, un PDF o un SVG y la IA crea la página igual. Los HTML y ZIP se abren tal cual." },
-  { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones»." },
+  { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones», con una miniatura, para renombrar o eliminar." },
   { icon: "external", name: "Publicar", what: "Envuelve todo el proyecto en un solo archivo HTML y te deja copiarlo o descargarlo para subirlo a Netlify, GitHub Pages, etc." },
   { icon: "download", name: "Descargar", what: "Guarda el código del clon en tu dispositivo como archivo ZIP." },
   { icon: "database", name: "Datos", what: "Conecta el proyecto con tu bot de Telegram: lo que la gente envíe en los formularios te llega al chat. También puedes escribir «conecta este proyecto con la base de datos de Telegram» con el token y el ID." },
@@ -23,10 +23,12 @@ const EASY: Entry[] = [
   { icon: "send", name: "Aplicar", what: "Escribe qué quieres cambiar (por ejemplo «pon el botón en verde», o «usa el mismo logo de la captura»: la IA recuerda las capturas originales) y la IA lo hace." },
   { icon: "image", name: "Añadir imagen", what: "En el cuadro de cambios, adjunta más imágenes al proyecto (por ejemplo «muestra primero esta y luego esta otra»)." },
   { icon: "history", name: "Deshacer", what: "Devuelve el clon a como estaba antes del último cambio." },
+  { icon: "sparkles", name: "Afinar más", what: "Vuelve a comparar el resultado con tu captura original y corrige las diferencias que queden." },
 ];
 
 const TOP: Entry[] = [
   { icon: "bolt", name: "Fácil / Avanzado", what: "Fácil: clonar y pedir cambios. Avanzado: editor de código, historial y herramientas." },
+  { icon: "sun", name: "Tema claro / oscuro", what: "Cambia el aspecto de la propia app. La vista previa del clon siempre se ve como la web real." },
   { icon: "settings", name: "Ajustes", what: "Qué IA usar (Google Gemini gratis, OpenRouter gratis o Anthropic de pago) y su clave, Telegram y las copias automáticas." },
   { icon: "chat", name: "Ayuda (?)", what: "Abre esta guía." },
 ];

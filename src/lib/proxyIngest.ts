@@ -48,8 +48,28 @@ export function looksLikeServiceError(text: string): boolean {
 /** Tiempo que se espera a un servicio antes de lanzar también el siguiente */
 const STAGGER_MS = 2500;
 
-/** Último servicio que funcionó: se prueba primero en las siguientes descargas */
-let preferred = 0;
+const PREFERRED_KEY = "devstudio:preferredRelay";
+
+/** ¿Cuál probar primero? Se recuerda entre sesiones (en este navegador) cuál funcionó la última vez. */
+function readPreferred(): number {
+  try {
+    const name = localStorage.getItem(PREFERRED_KEY);
+    const i = name ? RELAYS.findIndex((r) => r.name === name) : -1;
+    return i === -1 ? 0 : i;
+  } catch {
+    return 0;
+  }
+}
+function writePreferred(i: number) {
+  try {
+    localStorage.setItem(PREFERRED_KEY, RELAYS[i]?.name ?? "");
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+
+/** Último servicio que funcionó: se prueba primero en las siguientes descargas (persiste entre sesiones) */
+let preferred = readPreferred();
 
 /** Proxy propio del usuario (si lo ha configurado en Ajustes): se prueba antes que los públicos. */
 let customProxy = "";
@@ -96,6 +116,7 @@ export async function raceRelays<T>(relays: Relay[], attempt: (relay: Relay, sig
         (value) => {
           if (done) return;
           preferred = Math.max(0, RELAYS.indexOf(relays[i]));
+          writePreferred(preferred);
           finish();
           resolve(value);
         },

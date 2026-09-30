@@ -87,7 +87,7 @@ interface StudioState {
   duplicateProject(id: string): Promise<void>;
   deleteProject(id: string): Promise<void>;
   setAutoInjectDeps(value: boolean): void;
-  patchProject(patch: Partial<Pick<Project, "ingest" | "origin" | "viewport">>): void;
+  patchProject(patch: Partial<Pick<Project, "ingest" | "origin" | "viewport" | "thumbnail">>): void;
 
   setActiveFile(path: string): void;
   updateFile(path: string, content: string): void;
