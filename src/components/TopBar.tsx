@@ -29,18 +29,23 @@ export function TopBar() {
   );
   const modeToggle = (
     <div className="seg mode-toggle" role="group" aria-label="Modo de la aplicación">
-      <button className={mode === "easy" ? "active" : ""} aria-pressed={mode === "easy"} onClick={() => setMode("easy")}>
+      <button className={mode === "easy" ? "active" : ""} aria-pressed={mode === "easy"} onClick={() => setMode("easy")} title="Modo fácil: clonar y pedir cambios">
         Fácil
       </button>
-      <button className={mode === "advanced" ? "active" : ""} aria-pressed={mode === "advanced"} onClick={() => setMode("advanced")}>
+      <button className={mode === "advanced" ? "active" : ""} aria-pressed={mode === "advanced"} onClick={() => setMode("advanced")} title="Modo avanzado: editor de código y herramientas">
         Avanzado
       </button>
     </div>
   );
   const settingsButton = (
-    <button className="btn icon" onClick={() => setSettingsOpen(true)} title="Ajustes" aria-label="Ajustes">
-      <Icon name="settings" />
-    </button>
+    <>
+      <button className="btn icon help-btn" onClick={() => useStudio.getState().setHelpOpen(true)} title="Ayuda: qué hace cada botón" aria-label="Ayuda">
+        ?
+      </button>
+      <button className="btn icon" onClick={() => setSettingsOpen(true)} title="Ajustes: clave de la IA, Telegram y más" aria-label="Ajustes">
+        <Icon name="settings" />
+      </button>
+    </>
   );
 
   if (mode === "easy" || !project) {

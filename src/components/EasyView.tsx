@@ -93,6 +93,9 @@ function StartScreen() {
   const ai = useStudio((s) => s.ai);
   const webImages = useStudio((s) => s.webImages);
   const showKeyCard = useStudio((s) => needsApiKey(s));
+  const aiReady = useStudio((s) => aiAvailable(s));
+  const precision = useEasy((s) => s.precision);
+  const setPrecision = useEasy((s) => s.setPrecision);
   const [url, setUrl] = useState("");
   const [over, setOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -196,11 +199,51 @@ function StartScreen() {
               e.target.value = "";
             }}
           />
-          <small className="muted">Las capturas y los vídeos los reconstruye la IA. Los HTML y ZIP se abren tal cual.</small>
+          <div className="precision">
+            <span className="small muted" id="precision-label">
+              Precisión con capturas y vídeos:
+            </span>
+            <div className="seg" role="group" aria-labelledby="precision-label">
+              <button
+                className={precision === "exact" ? "active" : ""}
+                aria-pressed={precision === "exact"}
+                onClick={() => setPrecision("exact")}
+                title="La copia más fiel posible. Tarda de 3 a 7 minutos."
+              >
+                Máxima
+              </button>
+              <button
+                className={precision === "fast" ? "active" : ""}
+                aria-pressed={precision === "fast"}
+                onClick={() => setPrecision("fast")}
+                title="Resultado en 1 o 2 minutos, algo menos detallado."
+              >
+                Rápida
+              </button>
+            </div>
+          </div>
+          <small className="muted">
+            {precision === "exact" ? "Máxima: la copia más fiel, tarda de 3 a 7 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
+            ZIP se abren tal cual.
+          </small>
         </section>
       </div>
 
-      {showKeyCard && <AiKeyCard compact />}
+      {showKeyCard ? (
+        <AiKeyCard compact />
+      ) : aiReady ? (
+        <div className="ai-status card">
+          <span className="ok">
+            <Icon name="check" /> IA conectada: tu clave está guardada en este navegador
+          </span>
+          <button className="btn sm" onClick={() => useStudio.getState().setSettingsOpen(true)} title="Cambiar la clave de la IA">
+            <Icon name="settings" size={12} /> Cambiar clave
+          </button>
+        </div>
+      ) : null}
+      <p className="muted small" style={{ textAlign: "center", margin: 0 }}>
+        ¿No sabes qué hace un botón? Pulsa <b>?</b> arriba a la derecha.
+      </p>
 
       {projects.length > 0 && (
         <section className="easy-recent" aria-labelledby="recent-title">
@@ -278,7 +321,7 @@ function WorkingScreen() {
               </div>
             )}
             <small className="muted">
-              Tiempo: {formatElapsed(elapsed)} · suele tardar entre 30 segundos y 3 minutos. Puedes dejar esta pantalla abierta.
+              Tiempo: {formatElapsed(elapsed)} · {useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 7 minutos" : "suele tardar 1 o 2 minutos"}. Puedes dejar esta pantalla abierta.
             </small>
           </div>
         )}
@@ -403,7 +446,7 @@ function ResultScreen() {
   return (
     <div className="easy-result">
       <div className="result-bar">
-        <button className="btn" onClick={goHome} aria-label="Nuevo clon">
+        <button className="btn" onClick={goHome} aria-label="Nuevo clon" title="Volver al inicio para clonar otra cosa">
           <Icon name="plus" /> <span className="label">Nuevo clon</span>
         </button>
         <div className="result-title">

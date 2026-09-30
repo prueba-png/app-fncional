@@ -10,6 +10,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { NewProjectDialog } from "./components/NewProjectDialog";
 import { Toasts } from "./components/Toasts";
 import { AskDialog } from "./components/AskDialog";
+import { HelpDialog } from "./components/HelpDialog";
 import { useAutoBackup } from "./hooks/useAutoBackup";
 import { useEasy } from "./store/easy";
 import { EasyView } from "./components/EasyView";
@@ -113,6 +114,7 @@ export function App() {
       <SettingsDialog />
       <NewProjectDialog />
       <AskDialog />
+      <HelpDialog />
       <Toasts />
     </div>
   );

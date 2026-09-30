@@ -50,6 +50,7 @@ interface StudioState {
   toasts: Toast[];
   settingsOpen: boolean;
   newProjectOpen: boolean;
+  helpOpen: boolean;
   pendingAsk: PendingAsk | null;
   ai: AiSource;
   /** Solo con ai = "claude": si esta vista puede enviar imágenes (null = aún no se sabe) */
@@ -65,6 +66,7 @@ interface StudioState {
   setTab(tab: ToolTab): void;
   setSettingsOpen(open: boolean): void;
   setNewProjectOpen(open: boolean): void;
+  setHelpOpen(open: boolean): void;
   updateSettings(patch: Partial<Settings>): Promise<void>;
 
   createProject(input: {
@@ -148,6 +150,7 @@ export const useStudio = create<StudioState>((set, get) => {
     toasts: [],
     settingsOpen: false,
     newProjectOpen: false,
+    helpOpen: false,
     pendingAsk: null,
     ai: "none",
     webImages: null,
@@ -165,6 +168,7 @@ export const useStudio = create<StudioState>((set, get) => {
 
     async init() {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
+      void db.requestPersistentStorage();
       set({ settings, projects, health: h, ai: h ? (h.llm === false ? "direct" : "server") : "none" });
       if (!h && !hasViewerRuntime()) {
         // Versión de un solo archivo en cualquier alojamiento: todo ocurre en el navegador
@@ -212,6 +216,9 @@ export const useStudio = create<StudioState>((set, get) => {
     },
     setNewProjectOpen(open) {
       set({ newProjectOpen: open });
+    },
+    setHelpOpen(open) {
+      set({ helpOpen: open });
     },
     async updateSettings(patch) {
       set({ settings: { ...get().settings, ...patch } });

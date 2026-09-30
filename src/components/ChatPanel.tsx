@@ -80,9 +80,15 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
 
+  // Nuevo mensaje: siempre al final. Mientras la IA escribe: solo si ya estabas al final (no te mueve si estás leyendo)
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, streamText.length > 0, Math.floor(streamText.length / 400)]);
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 140) el.scrollTop = el.scrollHeight;
+  }, [streamText]);
 
   const submit = () => {
     const text = input.trim();

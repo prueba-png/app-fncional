@@ -6,6 +6,7 @@ import { create } from "zustand";
 import type { ChatAttachment, FileMap } from "../../shared/types";
 import * as db from "../db/db";
 import { ingest } from "../lib/api";
+import { ingestViaRelay } from "../lib/proxyIngest";
 import { processReferenceFile } from "../lib/media";
 import { getSample, sampleSupportsImages } from "../lib/runtime";
 import { countImages, MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
@@ -39,8 +40,13 @@ export interface Job {
   usesAi: boolean;
 }
 
+export type Precision = "exact" | "fast";
+
 interface EasyState {
   mode: Mode;
+  /** Precisión del clonado con IA: «exact» (esfuerzo alto, más lento) o «fast» (ajuste normal) */
+  precision: Precision;
+  setPrecision(p: Precision): void;
   stage: Stage;
   job: Job | null;
   /** Notas por proyecto sobre cómo se clonó (se muestran en el resultado) */
@@ -57,6 +63,15 @@ interface EasyState {
 }
 
 const MODE_KEY = "devstudio:mode";
+const PRECISION_KEY = "devstudio:precision";
+
+function readPrecision(): Precision {
+  try {
+    return localStorage.getItem(PRECISION_KEY) === "fast" ? "fast" : "exact";
+  } catch {
+    return "exact";
+  }
+}
 const VISUAL_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|ogv|pdf)$/i;
 const CODE_RE = /\.(html?|css|m?js|json|txt|md|xml|svg)$/i;
 const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
@@ -91,11 +106,13 @@ function isVisual(f: File) {
   return f.type.startsWith("image/") || f.type.startsWith("video/") || f.type === "application/pdf" || VISUAL_RE.test(f.name);
 }
 
-const CLONE_PROMPT = `Clona con la máxima fidelidad posible la interfaz que aparece en los archivos adjuntos.
-- Reproduce la estructura, los colores, la tipografía, los espaciados y los componentes tal como se ven.
-- Crea una página completa y funcional: index.html, styles.css y script.js.
-- Debe verse bien en móvil, tablet y escritorio (diseño responsive).
-- Usa textos iguales o equivalentes a los de la referencia.`;
+const CLONE_PROMPT = `Clona EXACTAMENTE la interfaz que aparece en los archivos adjuntos, como si fuera una copia pixel a pixel.
+- Copia literalmente todos los textos visibles (títulos, menús, botones, precios, pies de página), sin resumir ni traducir.
+- Reproduce la misma estructura, el mismo orden de secciones y las mismas proporciones: anchos, altos, márgenes y espaciados relativos al tamaño de la captura indicado.
+- Usa los colores exactos de la captura (la paleta extraída te ayuda) y la tipografía más parecida de Google Fonts, con los mismos tamaños y pesos relativos.
+- Reproduce iconos, bordes, sombras, esquinas redondeadas y fondos (gradientes incluidos). Para fotos usa bloques del mismo color dominante.
+- Si la captura es de móvil (vertical y estrecha), el diseño principal debe ser el móvil; si es de escritorio, el de escritorio. Añade además adaptación responsive.
+- Crea una página completa y funcional: index.html, styles.css y script.js.`;
 
 const DESCRIBE_PROMPT = `No puedes ver la imagen original: esta vista no permite enviar imágenes.
 Crea la interfaz a partir de la DESCRIPCIÓN del usuario y de los datos extraídos de la captura (paleta de colores dominante y tamaño).
@@ -157,7 +174,14 @@ export const useEasy = create<EasyState>((set, get) => {
       if (s.streamText.includes("<file")) advance(2);
     });
     try {
-      await useChat.getState().send(prompt, { attachments, attachmentLabels: labels, mode: "generate-from-reference", webFetch: extra.webFetch });
+      // Precisión máxima: esfuerzo alto (más lento). Rápida: el ajuste normal. Los cambios posteriores siempre usan el normal.
+      await useChat.getState().send(prompt, {
+        attachments,
+        attachmentLabels: labels,
+        mode: "generate-from-reference",
+        webFetch: extra.webFetch,
+        effort: get().precision === "exact" ? "high" : undefined,
+      });
     } finally {
       unsubscribe();
     }
@@ -180,6 +204,16 @@ export const useEasy = create<EasyState>((set, get) => {
 
   return {
     mode: readMode(),
+    precision: readPrecision(),
+
+    setPrecision(precision) {
+      try {
+        localStorage.setItem(PRECISION_KEY, precision);
+      } catch {
+        /* sin almacenamiento */
+      }
+      set({ precision });
+    },
     stage: "start",
     job: null,
     notes: {},
@@ -226,65 +260,28 @@ export const useEasy = create<EasyState>((set, get) => {
       const typed = raw.trim();
       lastInput = { kind: "url", url: typed };
       abortController = new AbortController();
+      const signal = abortController.signal;
       const host = new URL(url).hostname;
       const studioState = useStudio.getState();
-      if (!studioState.health && studioState.ai === "direct") {
-        // Sin servidor: la IA visita la web con su herramienta web_fetch y la reconstruye
-        set({
-          stage: "working",
-          job: {
-            kind: "url",
-            title: `Clonando ${host}`,
-            usesAi: true,
-            steps: [
-              { label: "Preparando", state: "active" },
-              { label: "La IA está visitando la web", state: "pending" },
-              { label: "Construyendo la página", state: "pending" },
-              { label: "Preparando la vista previa", state: "pending" },
-            ],
-          },
-        });
-        if (needsApiKey(studioState)) {
-          fail("Para clonar webs necesitas conectar la IA (solo una vez).", { needsKey: true });
-          return;
-        }
-        try {
-          await studioState.createProject({
-            name: host,
-            files: { "index.html": "", "styles.css": "", "script.js": "" },
-            origin: { type: "url", detail: url },
-          });
-          await runAi(
-            `Usa la herramienta web_fetch para leer ${url} y clona esa página con la máxima fidelidad posible.
-- Reproduce su estructura, secciones, textos, navegación, formularios y enlaces principales.
-- Deduce el estilo visual (colores, tipografía, espaciados) de la marca y del contenido; usa las imágenes de la página por su URL absoluta cuando aparezcan.
-- Crea una página completa: index.html, styles.css y script.js, responsive.
-- Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,
-            [],
-            [],
-            {
-              webFetch: true,
-              note: "Clon hecho por la IA a partir del contenido de la web: la estructura y los textos son fieles, el diseño es aproximado. Para un resultado más exacto, sube también una captura.",
-            },
-          );
-        } catch (err) {
-          fail(friendlyAiError((err as Error).message));
-        }
-        return;
-      }
-      if (!studioState.health) {
+
+      // Clonado EXACTO (código HTML y CSS reales): con servidor propio, o sin él mediante un servicio de reenvío
+      const exact = studioState.health ? "server" : studioState.ai === "direct" ? "relay" : null;
+      if (!exact) {
         set({
           stage: "working",
           job: { kind: "url", title: `Clonar ${host}`, usesAi: false, steps: [{ label: "Descargando la página", state: "active" }] },
         });
         fail(
-          useStudio.getState().ai === "claude"
+          studioState.ai === "claude"
             ? "Desde el navegador no se pueden descargar otras webs. Haz una captura de pantalla de la web y súbela: la IA la clonará."
             : "Clonar por enlace necesita la app en tu ordenador (npm run dev). Mientras tanto, puedes subir una captura de la web.",
           { canRetry: false },
         );
         return;
       }
+      const download = (o: { url: string; keepScripts: boolean }) =>
+        exact === "server" ? ingest(o, signal) : ingestViaRelay({ ...o, url: /^https?:\/\//i.test(o.url) ? o.url : url });
+
       set({
         stage: "working",
         job: {
@@ -292,7 +289,7 @@ export const useEasy = create<EasyState>((set, get) => {
           title: `Clonando ${host}`,
           usesAi: false,
           steps: [
-            { label: "Descargando la página", state: "active" },
+            { label: "Descargando el código original de la página", state: "active" },
             { label: "Copiando estilos, imágenes y estructura", state: "pending" },
             { label: "Preparando la vista previa", state: "pending" },
           ],
@@ -300,7 +297,8 @@ export const useEasy = create<EasyState>((set, get) => {
       });
 
       try {
-        let result = await ingest({ url: typed, keepScripts: false }, abortController.signal);
+        let result = await download({ url: typed, keepScripts: false });
+        if (signal.aborted) return;
         advance(1);
         let note: string | undefined;
         if (result.looksClientRendered) {
@@ -309,7 +307,8 @@ export const useEasy = create<EasyState>((set, get) => {
             { label: "La web se construye con JavaScript: clonándola con sus scripts", state: "active" },
             ...steps.slice(2),
           ]);
-          result = await ingest({ url: result.finalUrl, keepScripts: true }, abortController.signal);
+          result = await download({ url: result.finalUrl, keepScripts: true });
+          if (signal.aborted) return;
           note =
             "Esta web se genera con JavaScript, así que el clon conserva sus scripts. Algunas partes (inicio de sesión, datos en vivo) pueden no funcionar fuera de la web original.";
         }
@@ -324,12 +323,59 @@ export const useEasy = create<EasyState>((set, get) => {
           source: "ingest",
         });
         if (result.warnings.length && !note) note = "Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto.";
-        finish(note);
-      } catch (err) {
-        if ((err as Error).name === "AbortError") return;
-        fail(friendlyUrlError((err as Error).message));
-      } finally {
         abortController = null;
+        finish(note);
+        return;
+      } catch (err) {
+        if ((err as Error).name === "AbortError" || signal.aborted) return;
+        if (exact === "server") {
+          abortController = null;
+          fail(friendlyUrlError((err as Error).message));
+          return;
+        }
+        // Sin servidor y sin servicio de reenvío disponible: la IA lee la web y la reconstruye
+      }
+      abortController = null;
+
+      set({
+        stage: "working",
+        job: {
+          kind: "url",
+          title: `Clonando ${host}`,
+          usesAi: true,
+          steps: [
+            { label: "No se pudo descargar el código original: lo hará la IA", state: "done" },
+            { label: "La IA está visitando la web", state: "active" },
+            { label: "Construyendo la página", state: "pending" },
+            { label: "Preparando la vista previa", state: "pending" },
+          ],
+        },
+      });
+      if (needsApiKey(useStudio.getState())) {
+        fail("Para clonar esta web necesitas conectar la IA (solo una vez).", { needsKey: true });
+        return;
+      }
+      try {
+        await useStudio.getState().createProject({
+          name: host,
+          files: { "index.html": "", "styles.css": "", "script.js": "" },
+          origin: { type: "url", detail: url },
+        });
+        await runAi(
+          `Usa la herramienta web_fetch para leer ${url} y clona esa página con la máxima fidelidad posible.
+- Reproduce su estructura, secciones, textos, navegación, formularios y enlaces principales.
+- Deduce el estilo visual (colores, tipografía, espaciados) de la marca y del contenido; usa las imágenes de la página por su URL absoluta cuando aparezcan.
+- Crea una página completa: index.html, styles.css y script.js, responsive.
+- Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,
+          [],
+          [],
+          {
+            webFetch: true,
+            note: "No se pudo descargar el código original de esta web, así que la IA la ha reconstruido a partir de su contenido: los textos son fieles y el diseño puede variar. Para más exactitud, sube también una captura.",
+          },
+        );
+      } catch (err) {
+        fail(friendlyAiError((err as Error).message));
       }
     },
 

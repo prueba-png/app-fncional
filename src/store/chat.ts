@@ -10,12 +10,16 @@ import { uid } from "../lib/util";
 import { useStudio } from "./studio";
 
 const HISTORY_TURNS = 12;
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const rank = (e: string) => EFFORTS.indexOf(e as (typeof EFFORTS)[number]);
 
 interface SendOptions {
   attachments?: ChatAttachment[];
   attachmentLabels?: string[];
   mode?: "edit" | "generate-from-reference";
   webFetch?: boolean;
+  /** Sustituye el esfuerzo de los ajustes para esta petición (p. ej. «high» al clonar) */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 interface ChatState {
@@ -126,7 +130,7 @@ export const useChat = create<ChatState>((set, get) => ({
         {
           apiKey: settings.anthropicApiKey || undefined,
           model: settings.model,
-          effort: settings.effort,
+          effort: opts.effort && rank(opts.effort) > rank(settings.effort) ? opts.effort : settings.effort,
           history,
           prompt: userMsg.content,
           files: useStudio.getState().project!.files,

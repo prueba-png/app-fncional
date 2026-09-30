@@ -22,7 +22,7 @@ También puedes abrirla directamente en el navegador del ordenador (doble clic).
 
 ## Diferencias con la versión con servidor
 
-- Clonar por enlace lo hace la IA leyendo la web: la estructura y los textos son fieles y el diseño es aproximado. Para más exactitud, sube también una captura.
+- Clonar por enlace descarga el código real de la web (HTML y CSS) a través de servicios públicos de reenvío (allorigins, codetabs, corsproxy). Si ninguno responde, la IA reconstruye la página a partir de su contenido.
 - En el modo avanzado, «Análisis» funciona sobre el proyecto abierto; descargar y analizar una URL directamente necesita el servidor (`npm run dev`).
 
 Se regenera con `npm run build:standalone`.

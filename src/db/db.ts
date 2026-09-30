@@ -261,12 +261,43 @@ function sessionSet(key: string, value: string) {
   }
 }
 
+/** Copia de seguridad de las claves en localStorage (solo en orígenes propios): si el navegador
+ * vacía IndexedDB o no lo permite, la clave sigue ahí y no hay que volver a pegarla. */
+function backupGet(key: string): string | null {
+  try {
+    return localStorage.getItem(`devstudio:keep:${key}`);
+  } catch {
+    return null;
+  }
+}
+function backupSet(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(`devstudio:keep:${key}`, value);
+    else localStorage.removeItem(`devstudio:keep:${key}`);
+  } catch {
+    /* sin almacenamiento local */
+  }
+}
+
+/** Pide al navegador que no borre los datos de la app para liberar espacio. */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    return (await navigator.storage.persisted()) || (await navigator.storage.persist());
+  } catch {
+    return false;
+  }
+}
+
 export async function loadSettings(): Promise<Settings> {
   const rows = await (await getDB()).getAll("settings");
   const out: Record<string, unknown> = { ...DEFAULT_SETTINGS };
   const shared = isSharedOrigin();
   for (const r of rows) if (r.key in DEFAULT_SETTINGS && !(shared && SECRET_KEYS.has(r.key as keyof Settings))) out[r.key] = r.value;
-  if (shared) for (const k of SECRET_KEYS) out[k] = sessionGet(k) ?? "";
+  for (const k of SECRET_KEYS) {
+    if (shared) out[k] = sessionGet(k) ?? "";
+    else if (!out[k]) out[k] = backupGet(k) ?? "";
+  }
   return out as unknown as Settings;
 }
 export async function saveSettings(s: Partial<Settings>) {
@@ -277,7 +308,10 @@ export async function saveSettings(s: Partial<Settings>) {
     if (shared && SECRET_KEYS.has(key as keyof Settings)) {
       sessionSet(key, String(value ?? ""));
       await tx.store.delete(key); // por si quedó guardada antes
-    } else await tx.store.put({ key, value });
+    } else {
+      await tx.store.put({ key, value });
+      if (SECRET_KEYS.has(key as keyof Settings)) backupSet(key, String(value ?? ""));
+    }
   }
   await tx.done;
 }

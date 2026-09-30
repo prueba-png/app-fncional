@@ -24,7 +24,11 @@ export function referencesToAttachments(refs: VisualReference[]): { attachments:
         label: r.kind === "video" ? `${r.name} · fotograma ${i + 1}/${r.frames.length}` : r.name,
       });
     });
-    if (r.palette.length) attachments.push({ type: "text", text: `Paleta dominante de ${r.name}: ${r.palette.join(", ")}` });
+    const facts = [
+      r.width && r.height ? `tamaño original ${r.width}×${r.height} px (${r.height > r.width * 1.3 ? "vertical: captura de móvil" : r.width > r.height * 1.3 ? "horizontal: captura de escritorio" : "casi cuadrada"})` : "",
+      r.palette.length ? `paleta dominante ${r.palette.join(", ")}` : "",
+    ].filter(Boolean);
+    if (facts.length) attachments.push({ type: "text", text: `Datos de ${r.name}: ${facts.join("; ")}` });
   }
   return { attachments, labels };
 }
