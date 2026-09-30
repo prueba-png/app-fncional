@@ -94,7 +94,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   anthropicApiKey: "",
   model: "claude-opus-5-5",
-  effort: "high",
+  // «medium» es el valor recomendado para Claude Opus 5.5: clones bastante más rápidos con buena calidad
+  effort: "medium",
   telegramToken: "",
   telegramChatId: "",
   telegramChatTitle: "",

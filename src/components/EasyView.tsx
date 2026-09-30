@@ -223,12 +223,30 @@ function StartScreen() {
   );
 }
 
+/** Segundos transcurridos mientras `active` sea true */
+function useElapsed(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    if (!active) return;
+    const start = Date.now();
+    const id = setInterval(() => setSeconds(Math.round((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return seconds;
+}
+
+function formatElapsed(s: number): string {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 /* ── Pantalla de progreso ──────────────────────────────────────── */
 function WorkingScreen() {
   const job = useEasy((s) => s.job);
   const { cancel, retry, goHome, cloneFromDescription } = useEasy.getState();
   const [description, setDescription] = useState("");
   const streamText = useChat((s) => s.streamText);
+  const elapsed = useElapsed(Boolean(job && !job.error));
   if (!job) return null;
   const filesInProgress = job.usesAi ? [...new Set([...streamText.matchAll(/<file\s+path="([^"]+)"/g)].map((m) => m[1]))] : [];
   const prose = job.usesAi && streamText ? parseFileBlocks(streamText).prose : "";
@@ -259,7 +277,9 @@ function WorkingScreen() {
                 ))}
               </div>
             )}
-            <small className="muted">Suele tardar entre 30 segundos y 2 minutos.</small>
+            <small className="muted">
+              Tiempo: {formatElapsed(elapsed)} · suele tardar entre 30 segundos y 3 minutos. Puedes dejar esta pantalla abierta.
+            </small>
           </div>
         )}
         {job.error && <div className={`notice ${job.needsDescription ? "warning" : "danger"}`}>{job.error}</div>}
@@ -329,6 +349,9 @@ function ResultScreen() {
 
   const last = messages.at(-1);
   const lastAi = last?.role === "assistant" ? last : undefined;
+  // Solo se reintenta una petición de cambio escrita por el usuario (no el clon inicial con adjuntos)
+  const prevUser = messages.at(-2);
+  const lastUserPrompt = prevUser?.role === "user" && !prevUser.meta?.attachments?.length ? prevUser.content : "";
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
@@ -416,6 +439,11 @@ function ResultScreen() {
               <span style={{ color: "var(--danger)" }}>{lastAi.meta.error}</span>
             ) : (
               <span className="muted">{parseFileBlocks(lastAi.content).prose.slice(0, 200) || "Cambio aplicado."}</span>
+            )}
+            {lastAi.meta?.error && !lastAi.meta?.changed?.length && lastUserPrompt && (
+              <button className="btn sm primary" onClick={() => void useChat.getState().send(lastUserPrompt)}>
+                <Icon name="refresh" size={12} /> Reintentar
+              </button>
             )}
             {undoTarget && (
               <button className="btn sm" onClick={() => void restoreVersion(undoTarget.id)}>
