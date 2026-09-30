@@ -89,7 +89,13 @@ export interface BackupRecord {
   projectCount: number;
 }
 
+/** Qué IA se usa: Google Gemini y OpenRouter tienen planes gratuitos; Anthropic es de pago */
+export type AiProvider = "gemini" | "openrouter" | "anthropic";
+
 export interface Settings {
+  aiProvider: AiProvider;
+  geminiApiKey: string;
+  openrouterApiKey: string;
   anthropicApiKey: string;
   model: string;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
@@ -100,6 +106,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  aiProvider: "gemini",
+  geminiApiKey: "",
+  openrouterApiKey: "",
   anthropicApiKey: "",
   model: "claude-opus-5-5",
   // «medium» es el valor recomendado para Claude Opus 5.5: clones bastante más rápidos con buena calidad
@@ -243,7 +252,7 @@ export async function deleteBackupRecord(id: string) {
 
 // ── Ajustes ────────────────────────────────────────────────────────────────
 /** Claves secretas: en alojamientos con origen compartido no se guardan de forma permanente. */
-const SECRET_KEYS = new Set<keyof Settings>(["anthropicApiKey", "telegramToken"]);
+const SECRET_KEYS = new Set<keyof Settings>(["anthropicApiKey", "geminiApiKey", "openrouterApiKey", "telegramToken"]);
 const SHARED_ORIGIN_HOSTS = ["raw.githack.com", "rawcdn.githack.com", "cdn.statically.io", "htmlpreview.github.io"];
 
 /**
@@ -306,7 +315,23 @@ export async function loadSettings(): Promise<Settings> {
     if (shared) out[k] = sessionGet(k) ?? "";
     else if (!out[k]) out[k] = backupGet(k) ?? "";
   }
+  // Quien ya tenía solo la clave de Anthropic la sigue usando hasta que añada una gratuita
+  if (!rows.some((r) => r.key === "aiProvider") && out.anthropicApiKey && !out.geminiApiKey && !out.openrouterApiKey) out.aiProvider = "anthropic";
   return out as unknown as Settings;
+}
+
+/** Clave de la IA elegida */
+export function providerKey(s: Pick<Settings, "aiProvider" | "geminiApiKey" | "openrouterApiKey" | "anthropicApiKey">): string {
+  return s.aiProvider === "gemini" ? s.geminiApiKey : s.aiProvider === "openrouter" ? s.openrouterApiKey : s.anthropicApiKey;
+}
+
+/** Reconoce de qué servicio es una clave por su formato */
+export function detectProvider(key: string): AiProvider | null {
+  const k = key.trim();
+  if (/^AIza[\w-]{30,}$/.test(k)) return "gemini";
+  if (/^sk-or-/.test(k)) return "openrouter";
+  if (/^sk-ant-/.test(k)) return "anthropic";
+  return null;
 }
 export async function saveSettings(s: Partial<Settings>) {
   const shared = isSharedOrigin();

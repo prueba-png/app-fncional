@@ -25,7 +25,7 @@ const EASY: Entry[] = [
 
 const TOP: Entry[] = [
   { icon: "bolt", name: "Fácil / Avanzado", what: "Fácil: clonar y pedir cambios. Avanzado: editor de código, historial y herramientas." },
-  { icon: "settings", name: "Ajustes", what: "Tu clave de la IA, el modelo, Telegram y las copias automáticas." },
+  { icon: "settings", name: "Ajustes", what: "Qué IA usar (Google Gemini gratis, OpenRouter gratis o Anthropic de pago) y su clave, Telegram y las copias automáticas." },
   { icon: "chat", name: "Ayuda (?)", what: "Abre esta guía." },
 ];
 

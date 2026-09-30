@@ -9,7 +9,7 @@ import { slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { readTelegramDbConfig } from "../lib/telegramDb";
-import { isSharedOrigin } from "../db/db";
+import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
 import { PreviewPane } from "./PreviewPane";
 import { Icon } from "./Icon";
 
@@ -26,41 +26,44 @@ export function EasyView() {
   );
 }
 
-/* ── Conectar la IA (una sola vez) ─────────────────────────────── */
+/* ── Conectar la IA gratuita (una sola vez) ─────────────────────── */
+const PROVIDER_NAMES: Record<AiProvider, string> = { gemini: "Google Gemini (gratis)", openrouter: "OpenRouter (gratis)", anthropic: "Anthropic Claude (de pago)" };
+
 function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boolean }) {
   const updateSettings = useStudio((s) => s.updateSettings);
   const toast = useStudio((s) => s.toast);
   const [key, setKey] = useState("");
   const save = async () => {
-    if (!key.trim().startsWith("sk-")) {
-      toast("La clave debe empezar por «sk-». Cópiala completa desde la consola de Anthropic.", "error");
+    const provider = detectProvider(key);
+    if (!provider) {
+      toast("Esa clave no parece de Google (empieza por «AIza»). Cópiala completa desde aistudio.google.com.", "error");
       return;
     }
-    await updateSettings({ anthropicApiKey: key.trim() });
-    toast("IA conectada", "success");
+    const field = provider === "gemini" ? "geminiApiKey" : provider === "openrouter" ? "openrouterApiKey" : "anthropicApiKey";
+    await updateSettings({ aiProvider: provider, [field]: key.trim() });
+    toast(`IA conectada: ${PROVIDER_NAMES[provider]}`, "success");
     onSaved?.();
   };
   return (
     <div className={`easy-card key-card${compact ? " compact" : ""}`}>
       <div className="easy-card-head">
         <Icon name="sparkles" size={18} />
-        <b>Conecta la IA</b>
+        <b>Conecta la IA gratis</b>
       </div>
       <p className="muted">
-        Para clonar desde capturas, vídeos o documentos, la app usa la IA de Anthropic. Solo tienes que hacerlo una vez.
+        Para clonar desde capturas, vídeos o documentos se usa la IA de Google (Gemini), <b>gratis</b>: solo necesitas tu cuenta de Google, sin
+        tarjeta ni pagos. Se hace una sola vez.
       </p>
       <ol className="key-steps">
         <li>
           Entra en{" "}
-          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">
-            console.anthropic.com
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer noopener">
+            aistudio.google.com/apikey
           </a>{" "}
-          y crea una clave (API key).
+          con tu cuenta de Google.
         </li>
-        <li>
-          En «Billing», añade saldo (desde 5 $). Cada clon cuesta unos céntimos.
-        </li>
-        <li>Copia la clave y pégala aquí:</li>
+        <li>Pulsa «Create API key» (Crear clave de API). Es gratis.</li>
+        <li>Copia la clave (empieza por «AIza…») y pégala aquí:</li>
       </ol>
       <div className="easy-input-row">
         <input
@@ -68,7 +71,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
           className="input"
           type="password"
           autoComplete="off"
-          placeholder="sk-ant-…"
+          placeholder="AIza…"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void save()}
@@ -81,7 +84,9 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
       <small className="muted">
         {isSharedOrigin()
           ? "Por seguridad, en este enlace la clave solo se recuerda mientras la pestaña esté abierta."
-          : "La clave se guarda solo en este navegador."}
+          : "La clave se guarda solo en este navegador."}{" "}
+        El plan gratuito de Google permite muchos clones al día; si se agota, se renueva solo. También sirve una clave gratuita de OpenRouter
+        («sk-or-…»).
       </small>
     </div>
   );
@@ -96,6 +101,7 @@ function StartScreen() {
   const webImages = useStudio((s) => s.webImages);
   const showKeyCard = useStudio((s) => needsApiKey(s));
   const aiReady = useStudio((s) => aiAvailable(s));
+  const aiProvider = useStudio((s) => s.settings.aiProvider);
   const precision = useEasy((s) => s.precision);
   const setPrecision = useEasy((s) => s.setPrecision);
   const [url, setUrl] = useState("");
@@ -236,7 +242,7 @@ function StartScreen() {
       ) : aiReady ? (
         <div className="ai-status card">
           <span className="ok">
-            <Icon name="check" /> IA conectada: tu clave está guardada en este navegador
+            <Icon name="check" /> IA conectada: {PROVIDER_NAMES[aiProvider]}
           </span>
           <button className="btn sm" onClick={() => useStudio.getState().setSettingsOpen(true)} title="Cambiar la clave de la IA">
             <Icon name="settings" size={12} /> Cambiar clave

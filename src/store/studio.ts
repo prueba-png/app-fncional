@@ -107,14 +107,16 @@ interface StudioState {
 /** ¿Se puede usar la IA ahora mismo? */
 export function aiAvailable(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
   if (s.ai === "claude") return true;
-  if (s.ai === "direct") return Boolean(s.settings.anthropicApiKey);
-  return s.ai === "server" && Boolean(s.settings.anthropicApiKey || s.health?.hasEnvApiKey);
+  if (s.ai !== "direct" && s.ai !== "server") return false;
+  // Gemini y OpenRouter se usan directamente desde el navegador, haya servidor o no
+  if (s.settings.aiProvider !== "anthropic") return Boolean(db.providerKey(s.settings));
+  return Boolean(s.settings.anthropicApiKey || (s.ai === "server" && s.health?.hasEnvApiKey));
 }
 
-/** Hay servidor local pero falta la clave de API. */
+/** Falta la clave de la IA elegida. */
 export function needsApiKey(s: Pick<StudioState, "ai" | "settings" | "health">): boolean {
-  if (s.ai === "direct") return !s.settings.anthropicApiKey;
-  return s.ai === "server" && !s.settings.anthropicApiKey && !s.health?.hasEnvApiKey;
+  if (s.ai !== "direct" && s.ai !== "server") return false;
+  return !aiAvailable(s);
 }
 
 /** Compilación de demostración sin servidor local (VITE_DEMO=1). */

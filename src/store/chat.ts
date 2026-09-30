@@ -7,8 +7,9 @@ import type { ChatMessage } from "../db/db";
 import { streamChat } from "../lib/api";
 import { getSample, sampleChat } from "../lib/runtime";
 import { streamDirect } from "../lib/directAi";
+import { streamGemini, streamOpenRouter } from "../lib/freeAi";
 import { uid } from "../lib/util";
-import { useStudio } from "./studio";
+import { aiAvailable, useStudio } from "./studio";
 
 const HISTORY_TURNS = 12;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -74,8 +75,8 @@ export const useChat = create<ChatState>((set, get) => ({
       studio.toast("La IA no está disponible aquí. Abre la app con «npm run dev» en tu ordenador.", "error");
       return;
     }
-    if (!useWeb && !settings.anthropicApiKey && !studio.health?.hasEnvApiKey) {
-      studio.toast("Configura tu clave de API de Anthropic en Ajustes.", "error");
+    if (!useWeb && !aiAvailable(studio)) {
+      studio.toast("Conecta la IA gratuita (clave de Google) en Ajustes.", "error");
       studio.setSettingsOpen(true);
       return;
     }
@@ -127,9 +128,9 @@ export const useChat = create<ChatState>((set, get) => ({
         text = result.text;
         model = "Claude (tu cuenta de claude.ai)";
         stopReason = result.truncated ? "max_tokens" : "end_turn";
-      } else await (studio.ai === "direct" ? streamDirect : streamChat)(
+      } else await (settings.aiProvider === "gemini" ? streamGemini : settings.aiProvider === "openrouter" ? streamOpenRouter : studio.ai === "direct" ? streamDirect : streamChat)(
         {
-          apiKey: settings.anthropicApiKey || undefined,
+          apiKey: (settings.aiProvider === "anthropic" ? settings.anthropicApiKey : db.providerKey(settings)) || undefined,
           model: settings.model,
           effort: opts.effort && rank(opts.effort) > rank(settings.effort) ? opts.effort : settings.effort,
           history,
