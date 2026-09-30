@@ -111,3 +111,28 @@ describe("cupo agotado", () => {
     await expect(streamGemini(makeReq("k-agotado"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError" });
   });
 });
+
+describe("fallos de red (Load failed)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("Gemini reintenta el mismo modelo si la red falla y luego funciona", async () => {
+    let n = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-red");
+      n++;
+      if (n === 1) throw new TypeError("Load failed"); // primer intento: red caída
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }] }]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamGemini(makeReq("k-red"), (e) => events.push(e), new AbortController().signal);
+    expect(n).toBe(2);
+    expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
+  });
+
+  it("Gemini da un mensaje claro (no «Load failed») si la red falla siempre", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-red2");
+      throw new TypeError("Load failed");
+    });
+    await expect(streamGemini(makeReq("k-red2"), () => {}, new AbortController().signal)).rejects.toThrow(/conexión|Vuelve a intentarlo/i);
+  });
+});

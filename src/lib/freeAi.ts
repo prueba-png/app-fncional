@@ -73,6 +73,27 @@ type Emit = (e: ChatStreamEvent) => void;
 /** Modelo → hora hasta la que no se vuelve a probar (agotó su cupo gratuito) */
 const exhaustedUntil = new Map<string, number>();
 
+/** Cuántos segundos se esperan datos antes de dar la conexión por colgada y reintentar */
+const STALL_MS = 45_000;
+
+/**
+ * Fallo de red (conexión caída, sin cobertura, envío cortado): en el móvil aparece como
+ * «Load failed» o «Failed to fetch». Se puede reintentar.
+ */
+function isNetworkError(err: unknown): boolean {
+  const e = err as { name?: string; message?: string };
+  const m = `${e?.name ?? ""} ${e?.message ?? ""}`.toLowerCase();
+  return /load failed|failed to fetch|networkerror|network error|network request failed|the network connection was lost|conexión|timeout|timed out|err_|fetch failed|connection|stream (?:se )?cort|se cortó/i.test(m) || e?.name === "TypeError";
+}
+
+/** Mensaje claro en español para el usuario a partir de un error cualquiera. */
+function friendlyMessage(err: unknown): string {
+  if (isNetworkError(err))
+    return "Se perdió la conexión al hablar con la IA (habitual con datos móviles). Vuelve a intentarlo; si falla mucho, usa wifi o prueba de nuevo en un momento.";
+  const m = (err as Error)?.message;
+  return m && m.length < 300 ? m : "No se pudo completar la petición. Inténtalo de nuevo.";
+}
+
 class ProviderError extends Error {
   constructor(
     message: string,
@@ -130,7 +151,21 @@ async function readSse(
       await reader.cancel().catch(() => {});
       break;
     }
-    const { done, value } = await reader.read();
+    // Vigilante de conexión colgada: si no llegan datos en STALL_MS, se corta y se reintenta
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stall = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("La conexión se cortó (sin respuesta).")), STALL_MS);
+    });
+    let result: ReadableStreamReadResult<Uint8Array>;
+    try {
+      result = await Promise.race([reader.read(), stall]);
+    } catch (err) {
+      await reader.cancel().catch(() => {});
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+    const { done, value } = result;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let idx: number;
@@ -157,7 +192,7 @@ async function midStream(emitted: () => number, run: () => Promise<void>) {
     if ((err as Error).name === "AbortError") throw err;
     if (emitted() > 0)
       throw new ProviderError(
-        `La respuesta se cortó: ${(err as Error).message}`,
+        isNetworkError(err) ? "La respuesta se cortó a mitad (se perdió la conexión). Vuelve a pulsar para continuar." : `La respuesta se cortó: ${(err as Error).message}`,
         false,
       );
     throw err;
@@ -404,6 +439,12 @@ export async function streamGemini(
           await new Promise((r) => setTimeout(r, 2500));
           continue;
         }
+        // Fallo de red antes de recibir texto: se reintenta el mismo modelo un par de veces
+        if (isNetworkError(err) && attempt < 2) {
+          emit({ type: "status", message: "Se cortó la conexión; reintentando…" });
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          continue;
+        }
         if (e.status === 429) {
           lastLimit = true;
           exhaustedUntil.set(model, Date.now() + 10 * 60_000);
@@ -418,6 +459,7 @@ export async function streamGemini(
     throw quotaError(
       "Has usado el cupo gratuito de Google por ahora (se renueva solo: espera un minuto o, si es el límite diario, hasta mañana). También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
+  if (isNetworkError(last)) throw new Error(friendlyMessage(last));
   throw last instanceof Error
     ? last
     : new Error("No se pudo usar la IA de Google.");
@@ -611,22 +653,32 @@ export async function streamOpenRouter(
   const needsImages = (req.attachments ?? []).some((a) => a.type === "image");
   let last: unknown;
   for (const model of await freeOpenRouterModels(needsImages)) {
-    try {
-      emit({ type: "status", message: `Generando con ${model} (gratis)…` });
-      await openRouterOnce(model, req, emit, signal);
-      return;
-    } catch (err) {
-      if (signal.aborted || (err as Error).name === "AbortError")
-        throw aborted();
-      last = err;
-      if (!(err instanceof ProviderError) || !err.tryNext) break;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        emit({ type: "status", message: `Generando con ${model} (gratis)…` });
+        await openRouterOnce(model, req, emit, signal);
+        return;
+      } catch (err) {
+        if (signal.aborted || (err as Error).name === "AbortError")
+          throw aborted();
+        last = err;
+        // Fallo de red antes de recibir texto: se reintenta el mismo modelo
+        if (isNetworkError(err) && attempt < 2) {
+          emit({ type: "status", message: "Se cortó la conexión; reintentando…" });
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
     }
+    if (!(last instanceof ProviderError) || !last.tryNext) break;
   }
   const e = last as ProviderError;
   if (e?.status === 429)
     throw quotaError(
       "Has usado el cupo gratuito de OpenRouter por hoy (50 peticiones al día). Vuelve mañana o usa la clave gratuita de Google.",
     );
+  if (isNetworkError(last)) throw new Error(friendlyMessage(last));
   throw last instanceof Error
     ? last
     : new Error("No se pudo usar la IA de OpenRouter.");
