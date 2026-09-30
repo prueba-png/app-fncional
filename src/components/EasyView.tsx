@@ -120,6 +120,7 @@ function StartScreen() {
   const [url, setUrl] = useState("");
   const [over, setOver] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [search, setSearch] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const startUrl = (value = url) => {
@@ -127,7 +128,7 @@ function StartScreen() {
     else useStudio.getState().toast("Escribe una dirección web, por ejemplo «ejemplo.com».", "error");
   };
   const startPrompt = () => {
-    if (prompt.trim()) void createFromPrompt(prompt);
+    if (prompt.trim()) void createFromPrompt(prompt, search);
   };
 
   return (
@@ -280,13 +281,22 @@ function StartScreen() {
               </button>
             ))}
           </div>
+          {aiProvider === "gemini" && (
+            <label className="check small muted" title="La IA busca en Google datos reales (precios, nombres, hechos actuales) antes de crear la página">
+              <input type="checkbox" checked={search} onChange={(e) => setSearch(e.target.checked)} /> Buscar en internet antes de crear (para
+              datos reales)
+            </label>
+          )}
           <div className="row">
             <div className="grow" />
             <button className="btn primary big" onClick={startPrompt} disabled={!prompt.trim()}>
               <Icon name="sparkles" size={14} /> Crear
             </button>
           </div>
-          <small className="muted">La IA construye exactamente lo que describas: cuanto más detalle des (secciones, colores, textos), más fiel será el resultado.</small>
+          <small className="muted">
+            La IA construye exactamente lo que describas: cuanto más detalle des (secciones, colores, textos), más fiel será el resultado.
+            {search && " Con búsqueda en internet puede tardar algo más."}
+          </small>
         </section>
       </div>
 

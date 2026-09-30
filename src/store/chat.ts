@@ -45,6 +45,7 @@ interface SendOptions {
   attachmentLabels?: string[];
   mode?: "edit" | "generate-from-reference";
   webFetch?: boolean;
+  webSearch?: boolean;
   /** Sustituye el esfuerzo de los ajustes para esta petición (p. ej. «high» al clonar) */
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
@@ -201,6 +202,7 @@ export const useChat = create<ChatState>((set, get) => ({
                 attachments,
                 mode: opts.mode ?? "edit",
                 webFetch: opts.webFetch,
+                webSearch: opts.webSearch,
               },
               onEvent,
               controller.signal,
@@ -210,8 +212,10 @@ export const useChat = create<ChatState>((set, get) => ({
           } catch (err) {
             lastErr = err;
             if ((err as Error).name === "AbortError") throw err;
-            // Solo se salta de servicio si se agotó el cupo y queda otra opción con clave
-            if ((err as Error).name === "QuotaError" && i < attempts.length - 1) {
+            const name = (err as Error).name;
+            // Se salta al siguiente servicio con clave cuando se agotó el cupo, o cuando la red falló sin
+            // llegar a escribir nada (así no se pierde ni se duplica lo que ya se hubiera generado)
+            if ((name === "QuotaError" || name === "NetworkError") && !text && i < attempts.length - 1) {
               set({ status: `Cambiando a otra IA gratuita (${attempts[i + 1].label})…` });
               continue;
             }

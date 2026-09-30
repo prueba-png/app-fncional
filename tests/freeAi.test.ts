@@ -135,4 +135,26 @@ describe("fallos de red (Load failed)", () => {
     });
     await expect(streamGemini(makeReq("k-red2"), () => {}, new AbortController().signal)).rejects.toThrow(/conexión|Vuelve a intentarlo/i);
   });
+
+  it("Gemini se rinde tras 2 intentos (no 3) para no tardar minutos con una conexión caída, y marca el error como de red", async () => {
+    let attempts = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-red3");
+      attempts++;
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(streamGemini(makeReq("k-red3"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "NetworkError" });
+    expect(attempts).toBe(2);
+  });
+
+  it("Gemini activa la búsqueda en internet cuando se pide (google_search) además de leer una URL si toca", async () => {
+    let sawTools: unknown;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-search");
+      sawTools = JSON.parse(String(init!.body)).tools;
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }] }]);
+    });
+    await streamGemini({ ...makeReq("k-search"), webSearch: true }, () => {}, new AbortController().signal);
+    expect(sawTools).toEqual([{ google_search: {} }]);
+  });
 });

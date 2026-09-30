@@ -113,6 +113,8 @@ export interface ChatRequest {
   mode?: "edit" | "generate-from-reference";
   /** Permite a la IA leer páginas web (herramienta web_fetch); se usa para clonar por enlace sin servidor */
   webFetch?: boolean;
+  /** Permite a la IA buscar en internet (Google) antes de responder, para usar datos reales; solo Gemini por ahora */
+  webSearch?: boolean;
 }
 
 /** Eventos SSE emitidos por /api/llm/chat */

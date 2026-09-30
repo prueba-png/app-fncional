@@ -18,6 +18,13 @@ import {
 } from "../../shared/prompts";
 
 const MAX_FILE_CHARS = 400_000;
+/** Tiempo máximo para conectar antes de dar la conexión por caída (una conexión colgada no debe tardar minutos en fallar) */
+const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Combina la señal de cancelación del usuario con un límite de tiempo para conectar. */
+function withConnectTimeout(signal: AbortSignal, ms = CONNECT_TIMEOUT_MS): AbortSignal {
+  return AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
+}
 
 /**
  * Lista de reserva por si no se puede consultar el catálogo. Los alias «-latest» apuntan siempre
@@ -74,7 +81,7 @@ type Emit = (e: ChatStreamEvent) => void;
 const exhaustedUntil = new Map<string, number>();
 
 /** Cuántos segundos se esperan datos antes de dar la conexión por colgada y reintentar */
-const STALL_MS = 45_000;
+const STALL_MS = 25_000;
 
 /**
  * Fallo de red (conexión caída, sin cobertura, envío cortado): en el móvil aparece como
@@ -212,6 +219,13 @@ function aborted(): Error {
   return err;
 }
 
+/** Fallo de red que agotó todos sus reintentos: la app puede saltar a otro servicio automáticamente. */
+function networkFailedError(message: string): Error {
+  const e = new Error(message);
+  e.name = "NetworkError";
+  return e;
+}
+
 // ── Google Gemini ──────────────────────────────────────────────────────────
 
 type GeminiPart =
@@ -324,9 +338,12 @@ async function geminiOnce(
         contents,
         generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
         // Con enlace: Gemini puede leer la web él mismo (herramienta gratuita «url_context»)
-        ...(withUrlTool ? { tools: [{ url_context: {} }] } : {}),
+        // Con búsqueda: Gemini puede consultar Google para datos reales antes de responder («google_search»)
+        ...(withUrlTool || req.webSearch
+          ? { tools: [...(withUrlTool ? [{ url_context: {} }] : []), ...(req.webSearch ? [{ google_search: {} }] : [])] }
+          : {}),
       }),
-      signal,
+      signal: withConnectTimeout(signal),
     },
   );
   if (!res.ok) throw await geminiError(res);
@@ -439,10 +456,10 @@ export async function streamGemini(
           await new Promise((r) => setTimeout(r, 2500));
           continue;
         }
-        // Fallo de red antes de recibir texto: se reintenta el mismo modelo un par de veces
-        if (isNetworkError(err) && attempt < 2) {
+        // Fallo de red antes de recibir texto: se reintenta el mismo modelo una vez más (poco más se gana insistiendo)
+        if (isNetworkError(err) && attempt < 1) {
           emit({ type: "status", message: "Se cortó la conexión; reintentando…" });
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          await new Promise((r) => setTimeout(r, 1200));
           continue;
         }
         if (e.status === 429) {
@@ -459,7 +476,7 @@ export async function streamGemini(
     throw quotaError(
       "Has usado el cupo gratuito de Google por ahora (se renueva solo: espera un minuto o, si es el límite diario, hasta mañana). También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
-  if (isNetworkError(last)) throw new Error(friendlyMessage(last));
+  if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));
   throw last instanceof Error
     ? last
     : new Error("No se pudo usar la IA de Google.");
@@ -557,7 +574,7 @@ async function openRouterOnce(
       "X-Title": "DevStudio Pro",
     },
     body: JSON.stringify({ model, messages, stream: true, temperature: 0.3 }),
-    signal,
+    signal: withConnectTimeout(signal),
   });
   if (!res.ok) {
     let message = "";
@@ -662,10 +679,10 @@ export async function streamOpenRouter(
         if (signal.aborted || (err as Error).name === "AbortError")
           throw aborted();
         last = err;
-        // Fallo de red antes de recibir texto: se reintenta el mismo modelo
-        if (isNetworkError(err) && attempt < 2) {
+        // Fallo de red antes de recibir texto: se reintenta el mismo modelo una vez más
+        if (isNetworkError(err) && attempt < 1) {
           emit({ type: "status", message: "Se cortó la conexión; reintentando…" });
-          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          await new Promise((r) => setTimeout(r, 1200));
           continue;
         }
         break;
@@ -678,7 +695,7 @@ export async function streamOpenRouter(
     throw quotaError(
       "Has usado el cupo gratuito de OpenRouter por hoy (50 peticiones al día). Vuelve mañana o usa la clave gratuita de Google.",
     );
-  if (isNetworkError(last)) throw new Error(friendlyMessage(last));
+  if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));
   throw last instanceof Error
     ? last
     : new Error("No se pudo usar la IA de OpenRouter.");
