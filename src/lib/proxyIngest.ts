@@ -51,9 +51,22 @@ const STAGGER_MS = 2500;
 /** Último servicio que funcionó: se prueba primero en las siguientes descargas */
 let preferred = 0;
 
+/** Proxy propio del usuario (si lo ha configurado en Ajustes): se prueba antes que los públicos. */
+let customProxy = "";
+export function setProxyUrl(url: string): void {
+  customProxy = (url ?? "").trim();
+}
+function customRelay(): Relay | null {
+  if (!customProxy || !/^https?:\/\//i.test(customProxy)) return null;
+  const join = customProxy.includes("?") ? "&" : "?";
+  return { name: "tu-servidor", url: (t) => `${customProxy}${join}url=${encodeURIComponent(t)}`, binary: true };
+}
+
 function ordered(filter?: (r: Relay) => boolean): Relay[] {
-  const list = [...RELAYS.slice(preferred), ...RELAYS.slice(0, preferred)];
-  return filter ? list.filter(filter) : list;
+  const base = [...RELAYS.slice(preferred), ...RELAYS.slice(0, preferred)];
+  const list = filter ? base.filter(filter) : base;
+  const custom = customRelay();
+  return custom ? [custom, ...list] : list;
 }
 
 /**

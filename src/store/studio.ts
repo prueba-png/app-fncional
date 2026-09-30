@@ -4,6 +4,7 @@ import { sanitizePath } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { Project, Settings, Version, VersionSource } from "../db/db";
 import { health, setServerless, type HealthInfo } from "../lib/api";
+import { setProxyUrl } from "../lib/proxyIngest";
 import { canSaveFiles, getSample, hasViewerRuntime, sampleSupportsImages } from "../lib/runtime";
 import { TEMPLATES } from "../lib/templates";
 import { uid } from "../lib/util";
@@ -177,6 +178,7 @@ export const useStudio = create<StudioState>((set, get) => {
       const [settings, projects, h] = await Promise.all([db.loadSettings(), db.listProjects(), health()]);
       void db.requestPersistentStorage();
       set({ settings, projects, health: h, ai: h ? (h.llm === false ? "direct" : "server") : "none" });
+      setProxyUrl(settings.proxyUrl);
       if (!h && !hasViewerRuntime()) {
         // Versión de un solo archivo en cualquier alojamiento: todo ocurre en el navegador
         setServerless(true);
@@ -235,6 +237,7 @@ export const useStudio = create<StudioState>((set, get) => {
     },
     async updateSettings(patch) {
       set({ settings: { ...get().settings, ...patch } });
+      if (patch.proxyUrl !== undefined) setProxyUrl(patch.proxyUrl);
       await db.saveSettings(patch);
     },
 

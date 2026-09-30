@@ -103,6 +103,8 @@ export interface Settings {
   telegramChatId: string;
   telegramChatTitle: string;
   autoBackupMinutes: number;
+  /** Proxy propio del usuario (Cloudflare Worker) para descargar webs al clonar por enlace */
+  proxyUrl: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -117,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   telegramChatId: "",
   telegramChatTitle: "",
   autoBackupMinutes: 0,
+  proxyUrl: "",
 };
 
 interface StudioDB extends DBSchema {

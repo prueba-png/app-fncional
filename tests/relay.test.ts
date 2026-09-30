@@ -97,3 +97,26 @@ describe("respuestas de error de los servicios", () => {
     expect(r.files["index.html"]).not.toContain("API key");
   });
 });
+
+describe("proxy propio del usuario", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("usa el servidor propio antes que los públicos cuando está configurado", async () => {
+    const { setProxyUrl, ingestViaRelay: ingest2 } = await import("../src/lib/proxyIngest");
+    setProxyUrl("https://mi-worker.workers.dev");
+    const hits: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      const u = new URL(input);
+      hits.push(u.hostname);
+      if (u.hostname === "mi-worker.workers.dev") {
+        const t = u.searchParams.get("url");
+        if (t === "https://propia.example/") return new Response('<!doctype html><html><head><title>P</title></head><body><h1>Servida por mi propio servidor</h1></body></html>', { headers: { "content-type": "text/html" } });
+        return new Response("", { status: 404 });
+      }
+      return new Response("", { status: 500 });
+    });
+    const r = await ingest2({ url: "https://propia.example/" });
+    expect(r.files["index.html"]).toContain("Servida por mi propio servidor");
+    expect(hits[0]).toBe("mi-worker.workers.dev");
+    setProxyUrl("");
+  });
+});

@@ -43,6 +43,7 @@ export function SettingsDialog() {
       telegramToken: draft.telegramToken.trim(),
       telegramChatId: draft.telegramChatId.trim(),
       autoBackupMinutes: Math.max(0, Math.round(draft.autoBackupMinutes)),
+      proxyUrl: draft.proxyUrl.trim().replace(/\/+$/, ""),
     });
     toast("Ajustes guardados", "success");
     close();
@@ -248,6 +249,29 @@ export function SettingsDialog() {
           </div>
         </>
       )}
+
+      <div className="section-title">Clonar por enlace (tu servidor de descarga)</div>
+      <div className="notice" style={{ marginBottom: 12 }}>
+        Opcional pero recomendado: un servidor propio gratuito para que clonar por enlace falle mucho menos. Publícalo en 5 minutos, sin
+        tarjeta: 1. Entra en{" "}
+        <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer noopener">
+          dash.cloudflare.com
+        </a>{" "}
+        y crea una cuenta. 2. «Workers &amp; Pages» → «Create Worker» → «Deploy». 3. «Edit code», pega el archivo{" "}
+        <code>proxy/worker.js</code> del proyecto y «Deploy». 4. Copia la dirección (<code>https://…workers.dev</code>) y pégala aquí.
+      </div>
+      <label className="field">
+        <span>Mi servidor de descarga (proxy)</span>
+        <input
+          className="input mono"
+          type="url"
+          autoComplete="off"
+          placeholder="https://tu-nombre.workers.dev"
+          value={draft.proxyUrl}
+          onChange={(e) => set("proxyUrl", e.target.value)}
+        />
+        <small>Solo para páginas públicas. Déjalo vacío para usar los servicios gratuitos compartidos.</small>
+      </label>
 
       <div className="section-title">
         Almacenamiento descentralizado (Telegram)
