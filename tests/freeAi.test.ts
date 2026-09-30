@@ -157,4 +157,38 @@ describe("fallos de red (Load failed)", () => {
     await streamGemini({ ...makeReq("k-search"), webSearch: true }, () => {}, new AbortController().signal);
     expect(sawTools).toEqual([{ google_search: {} }]);
   });
+
+  it("un «AbortError» de nuestro propio límite de tiempo al conectar (no el botón Detener) se reintenta, no se confunde con una cancelación", async () => {
+    // Simula lo que produce un fetch() cuyo AbortSignal.timeout interno salta: un AbortError, aunque
+    // la señal del usuario (la que pasa el botón «Detener») sigue intacta.
+    let n = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-timeout");
+      n++;
+      if (n === 1) {
+        const e = new Error("This operation was aborted");
+        e.name = "AbortError";
+        throw e;
+      }
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }] }]);
+    });
+    const userSignal = new AbortController().signal; // el usuario nunca pulsa «Detener»
+    const events: ChatStreamEvent[] = [];
+    await streamGemini(makeReq("k-timeout"), (e) => events.push(e), userSignal);
+    expect(n).toBe(2); // se reintentó en vez de rendirse como «cancelado»
+    expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
+    expect(events.every((e) => e.type !== "error")).toBe(true);
+  });
+
+  it("si el usuario SÍ pulsa «Detener» (su señal se marca), el error es una cancelación real", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-real-stop");
+      controller.abort(); // el «Detener» se pulsa mientras la petición está en marcha
+      const e = new Error("This operation was aborted");
+      e.name = "AbortError";
+      throw e;
+    });
+    await expect(streamGemini(makeReq("k-real-stop"), () => {}, controller.signal)).rejects.toMatchObject({ name: "AbortError", message: "Generación detenida por el usuario." });
+  });
 });

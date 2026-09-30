@@ -90,7 +90,11 @@ const STALL_MS = 25_000;
 function isNetworkError(err: unknown): boolean {
   const e = err as { name?: string; message?: string };
   const m = `${e?.name ?? ""} ${e?.message ?? ""}`.toLowerCase();
-  return /load failed|failed to fetch|networkerror|network error|network request failed|the network connection was lost|conexión|timeout|timed out|err_|fetch failed|connection|stream (?:se )?cort|se cortó/i.test(m) || e?.name === "TypeError";
+  if (e?.name === "TypeError" || e?.name === "TimeoutError") return true;
+  // Un «AbortError» que llega aquí (el aviso de cancelación real del usuario ya se descartó antes de
+  // llamar a esta función) solo puede venir de nuestro propio límite de tiempo al conectar: es de red.
+  if (e?.name === "AbortError") return true;
+  return /load failed|failed to fetch|networkerror|network error|network request failed|the network connection was lost|conexión|timeout|timed out|err_|fetch failed|connection|stream (?:se )?cort|se cortó/i.test(m);
 }
 
 /** Mensaje claro en español para el usuario a partir de un error cualquiera. */
@@ -192,11 +196,13 @@ async function readSse(
 }
 
 /** Si falla cuando ya se había escrito parte de la respuesta, no se reintenta con otro modelo (se duplicaría el texto) */
-async function midStream(emitted: () => number, run: () => Promise<void>) {
+async function midStream(signal: AbortSignal, emitted: () => number, run: () => Promise<void>) {
   try {
     await run();
   } catch (err) {
-    if ((err as Error).name === "AbortError") throw err;
+    // Solo es «el usuario canceló» si su propia señal está marcada; un AbortError con la señal del
+    // usuario intacta viene de nuestro límite de tiempo al conectar (fallo de red), no de pulsar «Detener»
+    if (signal.aborted) throw err;
     if (emitted() > 0)
       throw new ProviderError(
         isNetworkError(err) ? "La respuesta se cortó a mitad (se perdió la conexión). Vuelve a pulsar para continuar." : `La respuesta se cortó: ${(err as Error).message}`,
@@ -352,6 +358,7 @@ async function geminiOnce(
   let finish: string | null = null;
   let usage: { input: number; output: number } | undefined;
   await midStream(
+    signal,
     () => emitted,
     () =>
       readSse(
@@ -443,8 +450,9 @@ export async function streamGemini(
         await geminiOnce(model, req, emit, signal, withUrlTool);
         return;
       } catch (err) {
-        if (signal.aborted || (err as Error).name === "AbortError")
-          throw aborted();
+        // Solo es «detenida por el usuario» si SU señal está marcada; un AbortError con esa señal
+        // intacta es nuestro propio límite de tiempo al conectar (fallo de red), no un «Detener» real
+        if (signal.aborted) throw aborted();
         last = err;
         const e = err as ProviderError;
         // Sin herramienta de lectura de webs en este modelo: se reintenta sin ella
@@ -607,6 +615,7 @@ async function openRouterOnce(
   let finish: string | null = null;
   let usage: { input: number; output: number } | undefined;
   await midStream(
+    signal,
     () => emitted,
     () =>
       readSse(
@@ -676,8 +685,9 @@ export async function streamOpenRouter(
         await openRouterOnce(model, req, emit, signal);
         return;
       } catch (err) {
-        if (signal.aborted || (err as Error).name === "AbortError")
-          throw aborted();
+        // Solo es «detenida por el usuario» si SU señal está marcada; un AbortError con esa señal
+        // intacta es nuestro propio límite de tiempo al conectar (fallo de red), no un «Detener» real
+        if (signal.aborted) throw aborted();
         last = err;
         // Fallo de red antes de recibir texto: se reintenta el mismo modelo una vez más
         if (isNetworkError(err) && attempt < 1) {
