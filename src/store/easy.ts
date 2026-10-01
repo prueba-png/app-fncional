@@ -408,12 +408,28 @@ export const useEasy = create<EasyState>((set, get) => {
     cancel() {
       abortController?.abort();
       if (useChat.getState().streaming) useChat.getState().stop();
+      // Si lo cancelado no llegó a construir nada usable, se borra para no dejar un «clon» vacío y
+      // fantasma en la galería de «Tus clones» (no se espera a que termine: no debe frenar la navegación)
+      const prev = useStudio.getState().project;
+      if (prev && !Object.values(prev.files).some((c) => c.trim().length > 0)) {
+        void db.deleteProjectCascade(prev.id).then(() => {
+          useStudio.setState({ projects: useStudio.getState().projects.filter((p) => p.id !== prev.id) });
+        });
+      }
       set({ stage: "start", job: null });
     },
 
     async retry() {
       const input = lastInput;
       if (!input) return;
+      // Cada intento crea un proyecto nuevo; si el anterior falló sin llegar a construir nada usable
+      // (p. ej. se cortó la conexión antes de terminar ni un fichero), se borra antes de reintentar para
+      // no dejar un «clon» vacío y fantasma en la galería de «Tus clones».
+      const prev = useStudio.getState().project;
+      if (prev && !Object.values(prev.files).some((c) => c.trim().length > 0)) {
+        await db.deleteProjectCascade(prev.id);
+        useStudio.setState({ projects: useStudio.getState().projects.filter((p) => p.id !== prev.id) });
+      }
       if (input.kind === "url") await get().cloneUrl(input.url, input.instruction);
       else if (input.kind === "files") await get().cloneFiles(input.files, input.instruction);
       else await get().createFromPrompt(input.prompt, input.search);
