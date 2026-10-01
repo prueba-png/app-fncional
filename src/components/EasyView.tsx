@@ -655,7 +655,8 @@ function ResultScreen() {
   const { goHome, setMode, refineMore } = useEasy.getState();
   const refining = useEasy((s) => s.refining);
   const { toast, restoreVersion, setSettingsOpen } = useStudio.getState();
-  const { streaming, messages } = useChat();
+  const { streaming, messages, streamText, status } = useChat();
+  const elapsed = useElapsed(streaming);
   const canUseAi = useStudio((s) => aiAvailable(s));
   const missingKey = useStudio((s) => needsApiKey(s));
   const canDownload = useStudio((s) => s.canDownload);
@@ -818,8 +819,21 @@ function ResultScreen() {
       <div className="change-box">
         {showKey && missingKey && <AiKeyCard compact onSaved={() => setShowKey(false)} />}
         {streaming && (
-          <div className="row muted small">
-            <span className="spinner" /> Aplicando tu cambio…
+          <div className="ai-live change-live">
+            <div className="row muted small">
+              <span className="spinner" /> {status || "Aplicando tu cambio…"}
+            </div>
+            {parseFileBlocks(streamText).prose && <p className="muted small">{parseFileBlocks(streamText).prose.slice(0, 200)}</p>}
+            {[...new Set([...streamText.matchAll(/<file\s+path="([^"]+)"/g)].map((m) => m[1]))].length > 0 && (
+              <div className="row wrap">
+                {[...new Set([...streamText.matchAll(/<file\s+path="([^"]+)"/g)].map((m) => m[1]))].map((f) => (
+                  <span key={f} className="chip">
+                    <Icon name="file" size={11} /> {f}
+                  </span>
+                ))}
+              </div>
+            )}
+            <small className="muted">Tiempo: {formatElapsed(elapsed)} — los modelos gratuitos (sobre todo OpenRouter) pueden tardar: puedes dejar esta pantalla abierta mientras escribe.</small>
           </div>
         )}
         {!streaming && lastAi && (lastAi.meta?.changed?.length || lastAi.meta?.error) ? (
