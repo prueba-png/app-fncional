@@ -5,6 +5,7 @@ import { useStudio } from "../store/studio";
 import type { ChatMessage } from "../db/db";
 import { Icon } from "./Icon";
 import { MicButton } from "./MicButton";
+import { useWakeLock } from "../lib/wakeLock";
 import { ServerNotice } from "./ServerNotice";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { canResume, resumePrompt } from "../lib/util";
@@ -91,6 +92,7 @@ export function ChatPanel() {
   const ai = useStudio((s) => s.ai);
   const [input, setInput] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
+  useWakeLock(streaming);
 
   // Nuevo mensaje: siempre al final. Mientras la IA escribe: solo si ya estabas al final (no te mueve si estás leyendo)
   useEffect(() => {

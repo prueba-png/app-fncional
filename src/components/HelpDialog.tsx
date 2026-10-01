@@ -14,6 +14,7 @@ const EASY: Entry[] = [
   { icon: "sparkles", name: "Crear algo nuevo desde cero", what: "Describe con tus palabras lo que quieres (secciones, colores, textos) y la IA construye exactamente eso, sin partir de ninguna captura ni enlace." },
   { icon: "wand", name: "Idealizar", what: "Amplía tu idea con secciones, colores y textos concretos antes de crear, para que el resultado sea más fiel (ayuda sobre todo con IA gratuita más limitada, como OpenRouter). Revisa el texto y pulsa «Crear» cuando te guste." },
   { icon: "mic", name: "Micrófono", what: "Dicta por voz en vez de escribir, en cualquier cuadro de texto que lo tenga. Pulsa de nuevo para dejar de escuchar." },
+  { icon: "sun", name: "Pantalla sin apagarse", what: "Mientras la IA está generando o aplicando un cambio, el móvil no apaga la pantalla solo (si el navegador lo permite), para que la espera no se corte por bloqueo automático. No evita que se corte si cambias de app o apagas tú la pantalla." },
   { icon: "globe", name: "Buscar en internet antes de crear", what: "Marca esta casilla para que la IA busque en Google datos reales (precios, nombres, hechos actuales) antes de construir la página. Solo con Google Gemini." },
   { icon: "plus", name: "Nuevo clon", what: "Vuelve a la pantalla de inicio para clonar otra cosa. Lo anterior queda guardado en «Tus clones», con una miniatura, para renombrar o eliminar." },
   { icon: "external", name: "Publicar", what: "Envuelve todo el proyecto en un solo archivo HTML y te deja copiarlo o descargarlo para subirlo a Netlify, GitHub Pages, etc." },

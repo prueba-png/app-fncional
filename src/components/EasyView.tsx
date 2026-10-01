@@ -19,6 +19,7 @@ import { ExportDialog } from "./ExportDialog";
 import { TranslateDialog } from "./TranslateDialog";
 import { Icon } from "./Icon";
 import { MicButton } from "./MicButton";
+import { useWakeLock } from "../lib/wakeLock";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
 
@@ -568,7 +569,9 @@ function WorkingScreen() {
   const { cancel, retry, goHome, cloneFromDescription } = useEasy.getState();
   const [description, setDescription] = useState("");
   const streamText = useChat((s) => s.streamText);
-  const elapsed = useElapsed(Boolean(job && !job.error));
+  const working = Boolean(job && !job.error);
+  const elapsed = useElapsed(working);
+  useWakeLock(working);
   if (!job) return null;
   const filesInProgress = job.usesAi ? [...new Set([...streamText.matchAll(/<file\s+path="([^"]+)"/g)].map((m) => m[1]))] : [];
   const prose = job.usesAi && streamText ? parseFileBlocks(streamText).prose : "";
@@ -668,6 +671,7 @@ function ResultScreen() {
   const { toast, restoreVersion, setSettingsOpen } = useStudio.getState();
   const { streaming, messages, streamText, status } = useChat();
   const elapsed = useElapsed(streaming);
+  useWakeLock(streaming);
   const canUseAi = useStudio((s) => aiAvailable(s));
   const missingKey = useStudio((s) => needsApiKey(s));
   const canDownload = useStudio((s) => s.canDownload);

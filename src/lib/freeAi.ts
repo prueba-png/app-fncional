@@ -105,6 +105,22 @@ function isNetworkError(err: unknown): boolean {
   return /load failed|failed to fetch|networkerror|network error|network request failed|the network connection was lost|conexión|timeout|timed out|err_|fetch failed|connection|stream (?:se )?cort|se cortó/i.test(m);
 }
 
+/**
+ * OpenRouter envía estos avisos (código 400, o incluso con 200 pero dentro del propio stream) cuando el
+ * modelo gratuito elegido está saturado en ese momento (demasiados usuarios, su backend sin hueco, etc.):
+ * no es un fallo de la petición en sí, así que merece la pena probar otro modelo o proveedor.
+ */
+function isUpstreamCongestion(message: string): boolean {
+  return /provider returned error|upstream error|resourceexhausted|resource_exhausted|rate.?limit|overloaded|no instances available|no endpoints found|worker local total request limit|capacity/i.test(message);
+}
+
+/** Cupo gratuito agotado O proveedor saturado en este momento: en ambos casos conviene saltar a otra IA. */
+function providerBusyError(message: string): Error {
+  const e = new Error(message);
+  e.name = "QuotaError";
+  return e;
+}
+
 /** Mensaje claro en español para el usuario a partir de un error cualquiera. */
 function friendlyMessage(err: unknown): string {
   if (isNetworkError(err))
@@ -656,7 +672,7 @@ async function openRouterOnce(
       );
     throw new ProviderError(
       `OpenRouter (${res.status}): ${message || res.statusText}`,
-      res.status === 404 || res.status === 429 || res.status >= 500,
+      res.status === 404 || res.status === 429 || res.status >= 500 || isUpstreamCongestion(message),
       res.status,
     );
   }
@@ -753,6 +769,12 @@ export async function streamOpenRouter(
   if (e?.status === 429)
     throw quotaError(
       "Has usado el cupo gratuito de OpenRouter por hoy (50 peticiones al día). Vuelve mañana o usa la clave gratuita de Google.",
+    );
+  // Todos los modelos gratuitos probados estaban saturados en este momento (fallo del proveedor, no de la
+  // petición): no tiene sentido repetir la misma petición tal cual, pero sí probar otra IA si hay otra configurada.
+  if (e instanceof Error && isUpstreamCongestion(e.message))
+    throw providerBusyError(
+      "Los modelos gratuitos de OpenRouter están saturados ahora mismo (demasiados usuarios a la vez). Añade una clave gratuita de Google en Ajustes y la app se turnará sola, o inténtalo de nuevo en un momento.",
     );
   if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));
   throw last instanceof Error

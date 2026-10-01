@@ -99,6 +99,32 @@ describe("IA gratuita", () => {
     expect(chosen).toBe("google/gemma-vision:free");
     expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
   });
+
+  it("OpenRouter: un 400 «Provider returned error» (modelo saturado) prueba otro modelo en vez de rendirse", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a/modelo-saturado:free", context_length: 100000 }, { id: "b/modelo-bueno:free", context_length: 100000 }] }));
+      const model = JSON.parse(String(init!.body)).model;
+      seen.push(model);
+      if (seen.length === 1) return new Response(JSON.stringify({ error: { message: "Provider returned error" } }), { status: 400 });
+      return sse([{ choices: [{ delta: { content: "ok" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }, "[DONE]"]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamOpenRouter(makeReq("k-or-400"), (e) => events.push(e), new AbortController().signal);
+    expect(seen.length).toBe(2); // probó un segundo modelo en vez de rendirse en el primero
+    expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
+  });
+
+  it("OpenRouter: si TODOS los modelos devuelven «ResourceExhausted» (saturados), se puede saltar a otra IA (como el cupo agotado)", async () => {
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "c/modelo-1:free", context_length: 100000 }] }));
+      return sse([{ error: { message: "Upstream error from Nvidia: ResourceExhausted: Worker local total request limit reached (16/16)", code: 400 } }]);
+    });
+    await expect(streamOpenRouter(makeReq("k-or-exhausted"), () => {}, new AbortController().signal)).rejects.toMatchObject({
+      name: "QuotaError",
+      message: expect.stringContaining("saturados"),
+    });
+  });
 });
 
 describe("cupo agotado", () => {
