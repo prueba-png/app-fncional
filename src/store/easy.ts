@@ -527,7 +527,15 @@ export const useEasy = create<EasyState>((set, get) => {
         });
         // Un clon exacto no debe recibir librerías añadidas automáticamente (cambiarían su aspecto)
         useStudio.getState().setAutoInjectDeps(false);
-        if (result.warnings.length && !note) note = "Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto.";
+        // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
+        // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
+        // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
+        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado/i;
+        if (!note) {
+          const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));
+          if (serious.length) note = `Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto: ${serious[0]}`;
+          else if (result.warnings.length) note = result.warnings[0];
+        }
         abortController = null;
         // Si diste una instrucción («júntalo con…», «cambia…»), se aplica sobre el clon descargado
         if (instruction && aiAvailable(useStudio.getState())) {
