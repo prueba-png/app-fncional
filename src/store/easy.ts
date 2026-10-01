@@ -710,12 +710,15 @@ ${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : "
           files: { "index.html": "", "styles.css": "", "script.js": "" },
           origin: { type: "reference", detail: files.map((f) => f.name).join(", ") },
         });
-        const refs: db.VisualReference[] = [];
-        for (const f of visuals) {
-          const ref = await processReferenceFile(f, project.id, { videoFrames: 8 });
-          await db.saveReference(ref);
-          refs.push(ref);
-        }
+        // Cada archivo se procesa de forma independiente (recorte, paleta, fotogramas): se hace en
+        // paralelo en vez de uno detrás de otro, para no sumar sus tiempos con varios archivos subidos
+        const refs = await Promise.all(
+          visuals.map(async (f) => {
+            const ref = await processReferenceFile(f, project.id, { videoFrames: 8 });
+            await db.saveReference(ref);
+            return ref;
+          }),
+        );
         // La vista previa se abre con la misma pantalla que la captura (móvil, tablet u ordenador)
         const first = refs.find((r) => r.width && r.height);
         if (first) {

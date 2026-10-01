@@ -283,6 +283,13 @@ function StartScreen() {
             {precision === "exact" ? "Máxima: la copia más fiel (usa las imágenes reales de tu captura y compara el resultado con ella hasta dos veces para corregir diferencias), tarda de 3 a 6 minutos." : "Rápida: 1 o 2 minutos, algo menos detallada."} Los HTML y
             ZIP se abren tal cual.
           </small>
+          {precision === "exact" && aiProvider === "openrouter" && (
+            <small className="muted" style={{ color: "var(--warning, #c08b1e)" }}>
+              Con OpenRouter, «Máxima» hace dos pasadas completas con sus modelos gratuitos (más lentos que Google por ser compartidos entre
+              muchos usuarios), así que puede tardar bastante más de lo habitual. Si quieres agilizarlo, prueba «Rápida» o cambia a Google Gemini
+              en Ajustes.
+            </small>
+          )}
         </section>
 
         <section className="easy-card" aria-labelledby="create-prompt-title">
@@ -594,8 +601,12 @@ function WorkingScreen() {
             )}
             <small className="muted">
               Tiempo: {formatElapsed(elapsed)} ·{" "}
-              {job.kind === "prompt" ? "suele tardar 1 o 2 minutos" : useEasy.getState().precision === "exact" ? "con precisión máxima suele tardar de 3 a 6 minutos" : "suele tardar 1 o 2 minutos"}. Puedes
-              dejar esta pantalla abierta.
+              {job.kind === "prompt"
+                ? "suele tardar 1 o 2 minutos"
+                : useEasy.getState().precision === "exact"
+                  ? `con precisión máxima suele tardar de 3 a 6 minutos${useStudio.getState().settings.aiProvider === "openrouter" ? " (con OpenRouter, al ser más lento, puede llevar bastante más)" : ""}`
+                  : "suele tardar 1 o 2 minutos"}
+              . Puedes dejar esta pantalla abierta.
             </small>
           </div>
         )}
@@ -708,12 +719,14 @@ function ResultScreen() {
     if (extraImages.length) {
       setPreparing(true);
       try {
-        const refs: db.VisualReference[] = [];
-        for (const f of extraImages) {
-          const ref = await processReferenceFile(f, project.id);
-          await db.saveReference(ref);
-          refs.push(ref);
-        }
+        // Se procesan en paralelo (cada imagen es independiente) en vez de una detrás de otra
+        const refs = await Promise.all(
+          extraImages.map(async (f) => {
+            const ref = await processReferenceFile(f, project.id);
+            await db.saveReference(ref);
+            return ref;
+          }),
+        );
         const { attachments, labels } = referencesToAttachments(refs);
         setChange("");
         setExtraImages([]);
