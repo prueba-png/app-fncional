@@ -4,6 +4,7 @@ import { useChat } from "../store/chat";
 import { useStudio } from "../store/studio";
 import type { ChatMessage } from "../db/db";
 import { Icon } from "./Icon";
+import { MicButton } from "./MicButton";
 import { ServerNotice } from "./ServerNotice";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { canResume, resumePrompt } from "../lib/util";
@@ -206,6 +207,7 @@ export function ChatPanel() {
             <Icon name="trash" size={12} /> Limpiar chat
           </button>
           <div className="grow" />
+          <MicButton disabled={streaming} onText={(t) => setInput((p) => (p.trim() ? `${p.trim()} ${t}` : t))} />
           {streaming ? (
             <button className="btn danger" onClick={stop}>
               <Icon name="stop" /> Detener

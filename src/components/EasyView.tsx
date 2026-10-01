@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { parseFileBlocks } from "../../shared/fileBlocks";
 import { useEasy, normalizeUrl } from "../store/easy";
 import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
-import { useChat } from "../store/chat";
+import { useChat, improveIdea } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { canResume, resumePrompt, slugify, timeAgo } from "../lib/util";
@@ -18,6 +18,7 @@ import { PreviewPane } from "./PreviewPane";
 import { ExportDialog } from "./ExportDialog";
 import { TranslateDialog } from "./TranslateDialog";
 import { Icon } from "./Icon";
+import { MicButton } from "./MicButton";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
 
@@ -121,7 +122,9 @@ function StartScreen() {
   const [over, setOver] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [search, setSearch] = useState(false);
+  const [improving, setImproving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { toast } = useStudio.getState();
 
   const startUrl = (value = url) => {
     if (normalizeUrl(value)) askUrl(value);
@@ -129,6 +132,24 @@ function StartScreen() {
   };
   const startPrompt = () => {
     if (prompt.trim()) void createFromPrompt(prompt, search);
+  };
+  const improve = async () => {
+    const idea = prompt.trim();
+    if (!idea || improving) return;
+    if (needsApiKey(useStudio.getState())) {
+      toast("Para idealizar la idea hace falta conectar la IA (solo una vez).", "error");
+      return;
+    }
+    setImproving(true);
+    try {
+      const better = await improveIdea(idea, new AbortController().signal);
+      setPrompt(better);
+      toast("Idea ampliada. Revísala y pulsa «Crear» cuando te guste.", "success");
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setImproving(false);
+    }
   };
 
   return (
@@ -259,21 +280,24 @@ function StartScreen() {
             <Icon name="sparkles" size={18} />
             <b id="create-prompt-title">Crear algo nuevo desde cero</b>
           </div>
-          <textarea
-            id="easy-prompt"
-            className="textarea"
-            placeholder="Describe lo que quieres crear. Ej.: «una landing para una cafetería, con menú, horario y mapa, en tonos cálidos»"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                startPrompt();
-              }
-            }}
-            aria-label="Describe lo que quieres crear"
-            rows={3}
-          />
+          <div className="textarea-row">
+            <textarea
+              id="easy-prompt"
+              className="textarea"
+              placeholder="Describe lo que quieres crear. Ej.: «una landing para una cafetería, con menú, horario y mapa, en tonos cálidos»"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  startPrompt();
+                }
+              }}
+              aria-label="Describe lo que quieres crear"
+              rows={3}
+            />
+            <MicButton onText={(t) => setPrompt((p) => (p.trim() ? `${p.trim()} ${t}` : t))} />
+          </div>
           <div className="suggestions">
             {PROMPT_EXAMPLES.map((ex) => (
               <button key={ex} className="suggestion" onClick={() => setPrompt(ex)}>
@@ -287,9 +311,17 @@ function StartScreen() {
               datos reales)
             </label>
           )}
-          <div className="row">
+          <div className="row wrap">
+            <button
+              className="btn"
+              onClick={() => void improve()}
+              disabled={!prompt.trim() || improving}
+              title="La IA amplía tu idea con secciones, colores y textos concretos antes de crear, para que el resultado sea más fiel (sobre todo con IA gratuita más limitada)"
+            >
+              {improving ? <span className="spinner" /> : <Icon name="wand" size={14} />} Idealizar
+            </button>
             <div className="grow" />
-            <button className="btn primary big" onClick={startPrompt} disabled={!prompt.trim()}>
+            <button className="btn primary big" onClick={startPrompt} disabled={!prompt.trim() || improving}>
               <Icon name="sparkles" size={14} /> Crear
             </button>
           </div>
@@ -869,6 +901,7 @@ function ResultScreen() {
             disabled={streaming || preparing}
             aria-label="Describe el cambio que quieres"
           />
+          <MicButton big disabled={streaming || preparing} onText={(t) => setChange((c) => (c.trim() ? `${c.trim()} ${t}` : t))} />
           {streaming ? (
             <button className="btn danger big" aria-label="Detener" onClick={() => useChat.getState().stop()}>
               <Icon name="stop" /> <span className="label">Detener</span>

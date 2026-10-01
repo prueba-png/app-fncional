@@ -6,7 +6,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatRequest, ChatStreamEvent } from "./types";
 import { summarizeFileBlocks } from "./fileBlocks";
-import { REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext } from "./prompts";
+import { IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext } from "./prompts";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
@@ -77,7 +77,7 @@ export async function runClaudeChat(
   const model = body.model?.trim() || DEFAULT_MODEL;
   const useFallbacks = FALLBACK_MODELS.has(model);
   const supportsAdaptive = !model.startsWith("claude-haiku");
-  const system = body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
+  const system = body.mode === "improve-prompt" ? IMPROVE_PROMPT : body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
   const tools: Anthropic.Beta.BetaToolUnion[] | undefined = body.webFetch
     ? [{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 4, max_content_tokens: 100_000 }]
     : undefined;

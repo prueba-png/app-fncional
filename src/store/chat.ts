@@ -40,6 +40,51 @@ function buildProviderAttempts(studio: ReturnType<typeof useStudio.getState>): P
   return out;
 }
 
+/**
+ * Reescribe una idea breve como un prompt más detallado (modo "Idealizar"), usando el mismo turno de
+ * IA que «Crear desde cero» pero sin tocar el proyecto, el historial ni la vista previa: solo da texto.
+ * Si una IA agota su cupo, salta a la siguiente exactamente igual que al aplicar un cambio.
+ */
+export async function improveIdea(idea: string, signal: AbortSignal): Promise<string> {
+  const studio = useStudio.getState();
+  const attempts = buildProviderAttempts(studio);
+  if (!attempts.length) throw new Error("Conecta la IA gratuita (clave de Google) en Ajustes.");
+  let text = "";
+  let lastErr: unknown;
+  for (let i = 0; i < attempts.length; i++) {
+    const a = attempts[i];
+    try {
+      text = "";
+      await a.run(
+        {
+          apiKey: a.apiKey,
+          model: studio.settings.model,
+          effort: studio.settings.effort,
+          history: [],
+          prompt: idea,
+          files: {},
+          mode: "improve-prompt",
+        },
+        (e) => {
+          if (e.type === "text") text += e.text;
+        },
+        signal,
+      );
+      lastErr = undefined;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if ((err as Error).name === "AbortError") throw err;
+      const name = (err as Error).name;
+      if ((name === "QuotaError" || name === "NetworkError") && !text && i < attempts.length - 1) continue;
+      throw err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  if (!text.trim()) throw new Error("La IA no devolvió ningún texto. Inténtalo de nuevo.");
+  return text.trim();
+}
+
 interface SendOptions {
   attachments?: ChatAttachment[];
   attachmentLabels?: string[];

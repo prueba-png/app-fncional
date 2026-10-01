@@ -21,6 +21,7 @@ Reglas técnicas:
 - Produce HTML semántico y accesible: etiquetas <label> asociadas, atributos alt, contraste suficiente, foco visible, landmarks.
 - Mantén el estilo de código existente (indentación, nomenclatura, convenciones CSS) salvo que el usuario pida otra cosa.
 - El código se ejecuta sin servidor: no dependas de APIs de backend; simula los datos si hace falta.
+- Aplica EXACTAMENTE lo que pide el usuario, ni más ni menos: no toques secciones, textos, colores o estructura que no haya mencionado, no "mejores" ni reinterpretes el cambio por tu cuenta, y no añadas funciones extra que no haya pedido. Si pide algo concreto y medible (un color, un texto exacto, una posición, un tamaño), cúmplelo literalmente en vez de aproximarlo.
 - Si la petición es ambigua, elige la interpretación más razonable y menciónalo en la explicación.
 
 Base de datos en Telegram:
@@ -38,6 +39,24 @@ Tu objetivo es una copia EXACTA, píxel a píxel: quien compare tu página con l
 - Imágenes reales: para fotos, logotipos, ilustraciones, avatares, banderas o iconos complejos NO uses marcadores ni imágenes externas; recórtalos de la propia captura con src="captura:<id>#x,y,ancho,alto" (en <img> o en url() de CSS), con el id y las coordenadas en píxeles de la imagen completa que se indican en los datos. Recorta con precisión el rectángulo de cada imagen, sin márgenes de fondo. La app sustituye cada referencia por el recorte real.
 - Iconos sencillos (flechas, menú, lupa, redes sociales) mejor como SVG en línea del mismo color y tamaño.
 - Si hay varios fotogramas de un vídeo, son estados o pantallas de la misma interfaz: reprodúcelos todos (secciones, menús abiertos, pestañas) e implementa las transiciones o interacciones que se deducen.`;
+
+/**
+ * Modo "idealizar": el usuario describe su idea con pocas palabras y quiere un prompt más completo
+ * para pegarlo luego en "Crear algo nuevo desde cero". No se genera página ni código aquí, solo texto.
+ * Esto ayuda sobre todo con los modelos gratuitos más limitados (p. ej. OpenRouter), que siguen mejor
+ * instrucciones concretas y detalladas que ideas sueltas.
+ */
+export const IMPROVE_PROMPT = `El usuario quiere crear una página web y te da una idea breve. Tu única tarea es reescribirla como un
+prompt detallado y concreto, en español, para pegarlo en un generador de páginas. NO generes HTML, CSS, JavaScript ni
+ningún <file>: devuelve SOLO el texto del prompt mejorado, nada más (ni explicaciones antes ni después).
+
+El prompt mejorado debe:
+- Conservar fielmente la idea original: ni quitar ni inventar el tipo de negocio o proyecto que pidió.
+- Detallar las secciones concretas que debería tener la página (en el orden en que deberían aparecer).
+- Proponer una paleta de colores o estilo visual coherente con el tema, si el usuario no dio uno.
+- Sugerir textos de ejemplo concretos (nombre, eslogan, categorías, etc.) en vez de quedarse en lo genérico, siempre que el usuario no haya dado ya datos reales.
+- Mantenerse en un solo párrafo o una lista corta de viñetas: no te extiendas más de lo necesario para que sea un prompt claro, no un informe.
+- Si el usuario ya fue muy concreto y detallado, no inventes nada nuevo: limítate a ordenar y pulir la redacción.`;
 
 /** Contexto con los ficheros actuales del proyecto. Lanza un error si supera `maxChars`. */
 export function buildFilesContext(files: Record<string, string>, activeFile: string | undefined, maxChars: number): string {

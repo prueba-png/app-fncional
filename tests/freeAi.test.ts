@@ -110,6 +110,25 @@ describe("cupo agotado", () => {
     });
     await expect(streamGemini(makeReq("k-agotado"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError" });
   });
+
+  it("distingue el límite por minuto (mensaje de esperar un minuto) del límite diario real (quotaId con PerDay)", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-minuto");
+      return new Response(
+        JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" }] }, { retryDelay: "38s" }] } }),
+        { status: 429 },
+      );
+    });
+    await expect(streamGemini(makeReq("k-minuto"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError", message: expect.stringContaining("por minuto") });
+  });
+
+  it("avisa del límite diario real (no «espera un minuto») cuando el quotaId dice PerDay", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-dia");
+      return new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } }), { status: 429 });
+    });
+    await expect(streamGemini(makeReq("k-dia"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError", message: expect.stringContaining("DIARIO") });
+  });
 });
 
 describe("fallos de red (Load failed)", () => {

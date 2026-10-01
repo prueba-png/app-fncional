@@ -12,6 +12,7 @@ import type {
 } from "../../shared/types";
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
 import {
+  IMPROVE_PROMPT,
   REFERENCE_PROMPT,
   SYSTEM_PROMPT,
   buildFilesContext,
@@ -111,12 +112,15 @@ class ProviderError extends Error {
     /** Probar con otro modelo puede funcionar (no existe, sin cupo, saturado) */
     readonly tryNext: boolean,
     readonly status = 0,
+    /** Solo en 429: si Google dijo cuánto esperar y si el límite es diario (no por minuto) */
+    readonly quota?: { retryMs?: number; daily: boolean },
   ) {
     super(message);
   }
 }
 
 function systemText(req: ChatRequest): string {
+  if (req.mode === "improve-prompt") return IMPROVE_PROMPT;
   return req.mode === "generate-from-reference"
     ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}`
     : SYSTEM_PROMPT;
@@ -255,17 +259,33 @@ function geminiParts(atts: ChatAttachment[] | undefined): GeminiPart[] {
 async function geminiError(res: Response): Promise<ProviderError> {
   let message = "";
   let reason = "";
+  let quota: { retryMs?: number; daily: boolean } | undefined;
   try {
     const j = (await res.json()) as {
       error?: {
         message?: string;
         status?: string;
-        details?: Array<{ reason?: string }>;
+        details?: Array<{
+          reason?: string;
+          violations?: Array<{ quotaId?: string }>;
+          retryDelay?: string;
+        }>;
       };
     };
     message = j.error?.message ?? "";
     reason =
       j.error?.details?.find((d) => d.reason)?.reason ?? j.error?.status ?? "";
+    if (res.status === 429) {
+      // Google indica en los detalles si el límite agotado es "por día" (PerDay) o "por minuto" (PerMinute),
+      // y a veces cuánto esperar exactamente (RetryInfo.retryDelay, p. ej. "38s"). Con eso se puede avisar
+      // con precisión en vez de decir siempre "espera hasta mañana" cuando solo hay que esperar un minuto.
+      const quotaId = j.error?.details?.flatMap((d) => d.violations ?? []).find((v) => v.quotaId)?.quotaId ?? "";
+      const retrySecs = j.error?.details?.find((d) => d.retryDelay)?.retryDelay;
+      quota = {
+        daily: /perday/i.test(quotaId),
+        retryMs: retrySecs ? parseFloat(retrySecs) * 1000 : undefined,
+      };
+    }
   } catch {
     /* sin cuerpo JSON */
   }
@@ -295,7 +315,7 @@ async function geminiError(res: Response): Promise<ProviderError> {
       res.status,
     );
   if (res.status === 429)
-    return new ProviderError("límite gratuito alcanzado", true, 429);
+    return new ProviderError("límite gratuito alcanzado", true, 429, quota);
   if (res.status >= 500)
     return new ProviderError(
       "Google está saturado en este momento",
@@ -430,6 +450,7 @@ export async function streamGemini(
   if (!req.apiKey)
     throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
   let lastLimit = false;
+  let lastQuotaDaily = false;
   let last: unknown;
   // Se usan los modelos que la propia cuenta tiene disponibles (siempre los últimos), no una lista fija
   const models = await discoverGeminiModels(req.apiKey);
@@ -472,7 +493,10 @@ export async function streamGemini(
         }
         if (e.status === 429) {
           lastLimit = true;
-          exhaustedUntil.set(model, Date.now() + 10 * 60_000);
+          lastQuotaDaily = !!e.quota?.daily;
+          // Por minuto: se reintenta pronto (lo que Google indique, o 70 s por defecto). Por día: no hay
+          // nada que ganar insistiendo hasta que Google reinicie el cupo, así que no se reintenta en horas.
+          exhaustedUntil.set(model, Date.now() + (lastQuotaDaily ? 6 * 60 * 60_000 : (e.quota?.retryMs ?? 60_000) + 10_000));
         }
         break;
       }
@@ -482,7 +506,9 @@ export async function streamGemini(
   }
   if (lastLimit)
     throw quotaError(
-      "Has usado el cupo gratuito de Google por ahora (se renueva solo: espera un minuto o, si es el límite diario, hasta mañana). También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
+      lastQuotaDaily
+        ? "Has agotado el cupo gratuito DIARIO de Google con este modelo (Google lo reinicia él solo, normalmente a medianoche hora del Pacífico de EE. UU., que puede ser por la mañana en España). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola mientras tanto."
+        : "Google ha puesto un límite de peticiones por minuto; espera un minuto y vuelve a intentarlo. También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
   if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));
   throw last instanceof Error
