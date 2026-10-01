@@ -644,7 +644,7 @@ async function openRouterOnce(
     }
     if (res.status === 401)
       throw new ProviderError(
-        "La clave de OpenRouter no es válida. Cópiala de nuevo desde openrouter.ai/keys.",
+        "La clave de OpenRouter no es válida. Causa más habitual: OpenRouter solo enseña la clave completa UNA VEZ, al crearla; si la copiaste después desde la lista de openrouter.ai/keys, ahí solo se ve una versión oculta (con puntos suspensivos) que no sirve. Crea una clave nueva y cópiala con el icono de copiar justo al crearla.",
         false,
         401,
       );

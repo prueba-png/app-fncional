@@ -35,11 +35,23 @@ export function SettingsDialog() {
   const close = () => setSettingsOpen(false);
 
   const save = async () => {
+    // Quita también espacios o saltos de línea internos (no solo al principio y al final): un copia-pega
+    // desde el móvil a veces los cuela sin que se note, y eso basta para que la clave no sea válida.
+    const openrouterApiKey = draft.openrouterApiKey.trim().replace(/\s+/g, "");
+    if (openrouterApiKey && !/^sk-or-v1-[a-f0-9]{20,}$/i.test(openrouterApiKey)) {
+      toast(
+        openrouterApiKey.includes("…") || openrouterApiKey.includes("...")
+          ? "Esa clave está incompleta (tiene puntos suspensivos): es la versión oculta que se ve en la lista de openrouter.ai/keys, no sirve. OpenRouter solo enseña la clave completa una vez, al crearla: crea una nueva y cópiala en ese momento con el icono de copiar."
+          : "Esa clave de OpenRouter no tiene el formato correcto (debería empezar por «sk-or-v1-»). Revísala en openrouter.ai/keys."
+        , "error",
+      );
+      return;
+    }
     await updateSettings({
       ...draft,
       anthropicApiKey: draft.anthropicApiKey.trim(),
       geminiApiKey: draft.geminiApiKey.trim(),
-      openrouterApiKey: draft.openrouterApiKey.trim(),
+      openrouterApiKey,
       telegramToken: draft.telegramToken.trim(),
       telegramChatId: draft.telegramChatId.trim(),
       autoBackupMinutes: Math.max(0, Math.round(draft.autoBackupMinutes)),

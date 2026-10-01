@@ -42,13 +42,23 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
   const toast = useStudio((s) => s.toast);
   const [key, setKey] = useState("");
   const save = async () => {
-    const provider = detectProvider(key);
+    const clean = key.trim().replace(/\s+/g, "");
+    const provider = detectProvider(clean);
     if (!provider) {
       toast("Esa clave no parece de Google (empieza por «AIza» o «AQ»). Cópiala completa desde aistudio.google.com.", "error");
       return;
     }
+    if (provider === "openrouter" && !/^sk-or-v1-[a-f0-9]{20,}$/i.test(clean)) {
+      toast(
+        clean.includes("…") || clean.includes("...")
+          ? "Esa clave está incompleta (tiene puntos suspensivos): es la versión oculta de la lista de openrouter.ai/keys, no sirve. OpenRouter solo enseña la clave completa una vez, al crearla: crea una nueva y cópiala en ese momento con el icono de copiar."
+          : "Esa clave de OpenRouter no tiene el formato correcto (debería empezar por «sk-or-v1-»). Revísala en openrouter.ai/keys.",
+        "error",
+      );
+      return;
+    }
     const field = provider === "gemini" ? "geminiApiKey" : provider === "openrouter" ? "openrouterApiKey" : "anthropicApiKey";
-    await updateSettings({ aiProvider: provider, [field]: key.trim() });
+    await updateSettings({ aiProvider: provider, [field]: clean });
     toast(`IA conectada: ${PROVIDER_NAMES[provider]}`, "success");
     onSaved?.();
   };
