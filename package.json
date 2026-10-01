@@ -2,7 +2,7 @@
   "name": "devstudio-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "Entorno de desarrollo local para análisis estructural de UI, prototipado rápido y respaldo descentralizado vía Telegram.",
+  "description": "Proyecto personal.",
   "type": "module",
   "license": "MIT",
   "engines": {
