@@ -646,7 +646,10 @@ async function openRouterOnce(
       authorization: `Bearer ${req.apiKey}`,
       "X-Title": "DevStudio Pro",
     },
-    body: JSON.stringify({ model, messages, stream: true, temperature: 0.3 }),
+    // Sin max_tokens, muchos backends gratuitos de OpenRouter usan un límite de salida por defecto muy
+    // bajo (a veces 1-2 mil tokens), cortando la página a medias (un fichero completo y el resto vacío).
+    // Se pide explícitamente un máximo generoso; si el modelo no llega a tanto, no pasa nada (no es obligatorio).
+    body: JSON.stringify({ model, messages, stream: true, temperature: 0.3, max_tokens: 16000 }),
     signal: withConnectTimeout(signal),
   });
   if (!res.ok) {

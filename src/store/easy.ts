@@ -753,6 +753,8 @@ ${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : "
         const prompt = instruction
           ? `INSTRUCCIÓN DEL USUARIO (haz exactamente esto con los archivos adjuntos): ${instruction}
 
+Completa el 100% de lo que pide la instrucción, de principio a fin: si menciona varias partes, secciones o pasos, ninguno puede quedar sin hacer o a medias. No te detengas tras cubrir solo una parte dando la tarea por terminada.
+
 Como apoyo, estas son las reglas de fidelidad cuando reproduzcas una captura:
 ${CLONE_PROMPT}
 

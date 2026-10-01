@@ -10,7 +10,7 @@ import { saveFile } from "../lib/runtime";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { readTelegramDbConfig } from "../lib/telegramDb";
 import { processReferenceFile } from "../lib/media";
-import { MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
+import { MAX_IMAGES_PER_REQUEST, memoryAttachments, referencesToAttachments } from "../lib/references";
 import * as db from "../db/db";
 import { detectProvider, isSharedOrigin, type AiProvider } from "../db/db";
 import type { Project } from "../db/db";
@@ -691,9 +691,11 @@ function ResultScreen() {
 
   const last = messages.at(-1);
   const lastAi = last?.role === "assistant" ? last : undefined;
-  // Solo se reintenta una petición de cambio escrita por el usuario (no el clon inicial con adjuntos)
   const prevUser = messages.at(-2);
-  const lastUserPrompt = prevUser?.role === "user" && !prevUser.meta?.attachments?.length ? prevUser.content : "";
+  const lastUserPrompt = prevUser?.role === "user" ? prevUser.content : "";
+  // Si ese turno llevaba capturas adjuntas (p. ej. el clon inicial), hay que volver a mandarlas al continuar:
+  // la IA no las recuerda si no se le reenvían.
+  const lastHadAttachments = Boolean(prevUser?.role === "user" && prevUser.meta?.attachments?.length);
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
@@ -748,6 +750,27 @@ function ResultScreen() {
     }
     setChange("");
     void useChat.getState().send(text);
+  };
+
+  /**
+   * «Continuar» (retoma lo cortado a medias) o «Reintentar» (repite la misma petición desde cero):
+   * en ambos casos, si ese turno llevaba capturas adjuntas (p. ej. el clon inicial), hay que volver a
+   * mandarlas; la IA no las recuerda si no se le reenvían.
+   */
+  const resendLastUser = async (mode: "continue" | "retry") => {
+    if (!lastUserPrompt) return;
+    const text = mode === "continue" ? resumePrompt(lastUserPrompt) : lastUserPrompt;
+    if (!lastHadAttachments) {
+      void useChat.getState().send(text);
+      return;
+    }
+    try {
+      const refs = await db.listReferences(project.id);
+      const attachments = memoryAttachments(refs);
+      await useChat.getState().send(text, { attachments, mode: "generate-from-reference" });
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
   };
 
   const download = async () => {
@@ -861,14 +884,14 @@ function ResultScreen() {
               <span className="muted">{parseFileBlocks(lastAi.content).prose.slice(0, 200) || "Cambio aplicado."}</span>
             )}
             {lastAi.meta?.error && lastUserPrompt && canResume(lastAi.meta.error) ? (
-              <button className="btn sm primary" onClick={() => void useChat.getState().send(resumePrompt(lastUserPrompt))} title="Termina lo que quedó a medias sin rehacer lo que ya está bien">
+              <button className="btn sm primary" onClick={() => void resendLastUser("continue")} title="Termina lo que quedó a medias sin rehacer lo que ya está bien">
                 <Icon name="refresh" size={12} /> Continuar
               </button>
             ) : (
               lastAi.meta?.error &&
               !lastAi.meta?.changed?.length &&
               lastUserPrompt && (
-                <button className="btn sm primary" onClick={() => void useChat.getState().send(lastUserPrompt)}>
+                <button className="btn sm primary" onClick={() => void resendLastUser("retry")}>
                   <Icon name="refresh" size={12} /> Reintentar
                 </button>
               )
