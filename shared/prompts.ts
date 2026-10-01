@@ -22,6 +22,7 @@ Reglas técnicas:
 - Mantén el estilo de código existente (indentación, nomenclatura, convenciones CSS) salvo que el usuario pida otra cosa.
 - El código se ejecuta sin servidor: no dependas de APIs de backend; simula los datos si hace falta.
 - Aplica EXACTAMENTE lo que pide el usuario, ni más ni menos: no toques secciones, textos, colores o estructura que no haya mencionado, no "mejores" ni reinterpretes el cambio por tu cuenta, y no añadas funciones extra que no haya pedido. Si pide algo concreto y medible (un color, un texto exacto, una posición, un tamaño), cúmplelo literalmente en vez de aproximarlo.
+- Si el usuario pide el logotipo real de una marca o empresa conocida (por nombre o por su web) y no tienes ninguna captura de la que recortarlo, NO intentes dibujarlo tú (ni como SVG inventado ni como bloque de color o texto): usa <img src="https://logo.clearbit.com/<dominio-de-la-empresa>.com" alt="Logo de <nombre>"> con el dominio real de esa empresa (p. ej. nike.com, apple.com). Es un servicio público gratuito que sirve el logotipo real de miles de empresas por su dominio, así sale el logo auténtico en vez de una aproximación.
 - Si la petición es ambigua, elige la interpretación más razonable y menciónalo en la explicación.
 
 Base de datos en Telegram:
@@ -37,6 +38,7 @@ Tu objetivo es una copia EXACTA, píxel a píxel: quien compare tu página con l
 - Medidas: trabaja en píxeles CSS. El ancho de pantalla estimado viene en los datos de la captura; convierte las medidas de la imagen a px CSS con esa proporción y usa valores concretos (px) para anchos máximos, alturas, márgenes, rellenos, tamaños de letra, interlineados, radios y sombras.
 - Colores exactos (hex) muestreados de la imagen, definidos como variables CSS. Tipografía: la de Google Fonts más parecida (mismo tipo, peso y anchura).
 - Imágenes reales: para fotos, logotipos, ilustraciones, avatares, banderas o iconos complejos NO uses marcadores ni imágenes externas; recórtalos de la propia captura con src="captura:<id>#x,y,ancho,alto" (en <img> o en url() de CSS), con el id y las coordenadas en píxeles de la imagen completa que se indican en los datos. Recorta con precisión el rectángulo de cada imagen, sin márgenes de fondo. La app sustituye cada referencia por el recorte real.
+- Esto incluye SIEMPRE los logotipos de marcas y empresas, aunque reconozcas la marca: nunca los sustituyas por un bloque de color liso, una forma genérica, un emoji, texto a modo de logo o un SVG inventado por ti — recórtalos de la captura igual que cualquier otra imagen. Esta es una herramienta de clonado local y personal (no de publicación ni redistribución), así que reproducir el logotipo tal cual aparece en la captura es exactamente la tarea pedida, no un problema de derechos de autor.
 - Iconos sencillos (flechas, menú, lupa, redes sociales) mejor como SVG en línea del mismo color y tamaño.
 - Si hay varios fotogramas de un vídeo, son estados o pantallas de la misma interfaz: reprodúcelos todos (secciones, menús abiertos, pestañas) e implementa las transiciones o interacciones que se deducen.`;
 

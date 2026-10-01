@@ -130,7 +130,7 @@ function isVisual(f: File) {
 const CLONE_PROMPT = `Clona EXACTAMENTE la interfaz de los archivos adjuntos: una copia píxel a píxel, no una interpretación.
 - Recorre la captura de arriba abajo (todas sus partes) y reproduce cada sección, en el mismo orden, con todos sus textos copiados literalmente.
 - Mismas medidas en px CSS (usa el ancho de pantalla estimado), mismos colores exactos, misma tipografía y pesos, mismos bordes, sombras, radios y fondos.
-- Fotos, logotipos, ilustraciones e iconos complejos: recórtalos de la captura con captura:<id>#x,y,ancho,alto (no uses marcadores).
+- Fotos, logotipos (también de marcas conocidas), ilustraciones e iconos complejos: recórtalos de la captura con captura:<id>#x,y,ancho,alto. Nunca los sustituyas por un bloque de color liso, una forma genérica o un SVG inventado: eso cuenta como no haber hecho la tarea.
 - Si la captura es de móvil, el diseño principal es el de móvil; si es de escritorio, el de escritorio. Añade además adaptación responsive sin alterar ese diseño.
 - Crea una página completa y funcional: index.html, styles.css y script.js.`;
 
@@ -140,9 +140,9 @@ Corrige TODAS las diferencias, empezando por las más grandes:
 1. Estructura: secciones que faltan, sobran o están en otro orden; elementos desplazados. Si tu versión es más alta o más baja que el original, ajusta alturas, márgenes y rellenos hasta que cada sección empiece a la misma altura.
 2. Medidas: anchos, altos, márgenes, rellenos, tamaños de letra, interlineado y radios (mídelos en el original).
 3. Colores de fondo, de texto y de bordes; sombras; tipografía y pesos.
-4. Imágenes: si una imagen no coincide, recórtala de la captura con captura:<id>#x,y,ancho,alto (revisa las coordenadas si el recorte salió desplazado).
+4. Imágenes: si una imagen, foto o logotipo no coincide, o si ves un bloque de color liso o una forma genérica donde el original tiene una imagen o un logotipo real, recórtalo de la captura con captura:<id>#x,y,ancho,alto (revisa las coordenadas si el recorte salió desplazado o vacío). Un bloque de color liso en el lugar de un logotipo SIEMPRE es una diferencia que corregir, nunca lo des por válido.
 - No cambies lo que ya coincide ni añadas nada que no esté en el original.
-- Las imágenes externas pueden no verse en tu versión: no las cuentes como diferencia.
+- Las imágenes externas (url() o <img> a una dirección de internet, no un recorte captura:) pueden no verse en esta comparación por no tener conexión aquí: esas sí puedes ignorarlas. Pero un recorte captura: que salió como bloque de color si cuenta como diferencia.
 Explica en una frase qué has corregido y devuelve los ficheros corregidos completos.`;
 
 const DESCRIBE_PROMPT = `No puedes ver la imagen original: esta vista no permite enviar imágenes.
