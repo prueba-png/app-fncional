@@ -81,6 +81,13 @@ type Emit = (e: ChatStreamEvent) => void;
 /** Modelo → hora hasta la que no se vuelve a probar (agotó su cupo gratuito) */
 const exhaustedUntil = new Map<string, number>();
 
+/**
+ * Clave → veces seguidas que ha dado 429 "por minuto" tras esperar el tiempo indicado. Si Google sigue
+ * devolviendo el mismo error después de haber esperado de sobra, el límite real no es "por minuto" (el
+ * aviso de Google no siempre distingue bien los dos casos): es más probable que sea el cupo diario.
+ */
+const consecutivePerMinuteHits = new Map<string, number>();
+
 /** Cuántos segundos se esperan datos antes de dar la conexión por colgada y reintentar */
 const STALL_MS = 25_000;
 
@@ -451,6 +458,7 @@ export async function streamGemini(
     throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
   let lastLimit = false;
   let lastQuotaDaily = false;
+  let lastQuotaEscalated = false;
   let last: unknown;
   // Se usan los modelos que la propia cuenta tiene disponibles (siempre los últimos), no una lista fija
   const models = await discoverGeminiModels(req.apiKey);
@@ -469,6 +477,7 @@ export async function streamGemini(
           message: `Generando con Google ${model} (gratis)…`,
         });
         await geminiOnce(model, req, emit, signal, withUrlTool);
+        consecutivePerMinuteHits.delete(req.apiKey!);
         return;
       } catch (err) {
         // Solo es «detenida por el usuario» si SU señal está marcada; un AbortError con esa señal
@@ -494,8 +503,20 @@ export async function streamGemini(
         if (e.status === 429) {
           lastLimit = true;
           lastQuotaDaily = !!e.quota?.daily;
-          // Por minuto: se reintenta pronto (lo que Google indique, o 70 s por defecto). Por día: no hay
-          // nada que ganar insistiendo hasta que Google reinicie el cupo, así que no se reintenta en horas.
+          if (!lastQuotaDaily) {
+            // Si Google ya ha dicho "por minuto" dos veces seguidas DESPUÉS de haber esperado el tiempo que
+            // él mismo indicó, el aviso no era preciso: el límite real se comporta como diario (no se libera
+            // en un minuto), así que se avisa de eso y no se insiste más en poco tiempo.
+            const hits = (consecutivePerMinuteHits.get(req.apiKey!) ?? 0) + 1;
+            consecutivePerMinuteHits.set(req.apiKey!, hits);
+            if (hits >= 2) {
+              lastQuotaDaily = true;
+              lastQuotaEscalated = true;
+            }
+          }
+          // Por minuto: se reintenta pronto (lo que Google indique, o 70 s por defecto). Por día (o tras
+          // repetirse): no hay nada que ganar insistiendo hasta que Google reinicie el cupo, así que no se
+          // reintenta en horas.
           exhaustedUntil.set(model, Date.now() + (lastQuotaDaily ? 6 * 60 * 60_000 : (e.quota?.retryMs ?? 60_000) + 10_000));
         }
         break;
@@ -506,9 +527,11 @@ export async function streamGemini(
   }
   if (lastLimit)
     throw quotaError(
-      lastQuotaDaily
-        ? "Has agotado el cupo gratuito DIARIO de Google con este modelo (Google lo reinicia él solo, normalmente a medianoche hora del Pacífico de EE. UU., que puede ser por la mañana en España). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola mientras tanto."
-        : "Google ha puesto un límite de peticiones por minuto; espera un minuto y vuelve a intentarlo. También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
+      lastQuotaEscalated
+        ? "Sigue dando el mismo límite de Google después de haber esperado: es probable que en realidad sea el cupo DIARIO (el aviso de «por minuto» de Google no siempre es exacto), no uno que se libere enseguida. Añade una clave gratuita de OpenRouter en Ajustes para seguir sin esperar, o vuelve a intentarlo más tarde."
+        : lastQuotaDaily
+          ? "Has agotado el cupo gratuito DIARIO de Google con este modelo (Google lo reinicia él solo, normalmente a medianoche hora del Pacífico de EE. UU., que puede ser por la mañana en España). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola mientras tanto."
+          : "Google ha puesto un límite de peticiones por minuto; espera un minuto y vuelve a intentarlo. También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
   if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));
   throw last instanceof Error

@@ -129,6 +129,26 @@ describe("cupo agotado", () => {
     });
     await expect(streamGemini(makeReq("k-dia"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError", message: expect.stringContaining("DIARIO") });
   });
+
+  it("si el límite «por minuto» se repite tras esperar lo indicado, avisa de que probablemente es el cupo diario", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", async (url: string) => {
+        if (isDiscovery(url)) return modelList("gemini-flash-repetido");
+        return new Response(
+          JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" }] }, { retryDelay: "30s" }] } }),
+          { status: 429 },
+        );
+      });
+      const key = "k-repetido";
+      await expect(streamGemini(makeReq(key), () => {}, new AbortController().signal)).rejects.toMatchObject({ message: expect.stringContaining("por minuto") });
+      // El usuario espera bastante más de lo que Google pidió (30 s) antes de reintentar
+      await vi.advanceTimersByTimeAsync(45_000);
+      await expect(streamGemini(makeReq(key), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "QuotaError", message: expect.stringContaining("no siempre es exacto") });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("fallos de red (Load failed)", () => {
