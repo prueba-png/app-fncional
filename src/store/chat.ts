@@ -282,8 +282,64 @@ export const useChat = create<ChatState>((set, get) => ({
       else error = (err as Error).message;
     }
 
+    let parsed = parseFileBlocks(text);
+    if (parsed.incomplete && !error && !useWeb && !controller.signal.aborted) {
+      // El modelo cortó un fichero a mitad (límite de salida del plan gratuito, o el flujo se interrumpió):
+      // en vez de descartarlo, se le pide que continúe EXACTAMENTE desde donde lo dejó, una sola vez, antes
+      // de rendirse. Se le da como historial su propia respuesta cortada para que sepa dónde seguir.
+      try {
+        set({ status: "Terminando el fichero cortado…" });
+        const contAttempts = buildProviderAttempts(studio);
+        const contHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
+        let contText = "";
+        let contErr: unknown;
+        for (let i = 0; i < contAttempts.length; i++) {
+          const a = contAttempts[i];
+          try {
+            contText = "";
+            await a.run(
+              {
+                apiKey: a.apiKey,
+                model: settings.model,
+                effort: settings.effort,
+                history: contHistory,
+                prompt:
+                  "Tu respuesta anterior se cortó a mitad de un bloque <file>. Continúa EXACTAMENTE desde el carácter siguiente a donde la dejaste: no repitas nada de lo ya escrito, no vuelvas a abrir la etiqueta <file>, termina ese fichero y ciérralo con </file>. Si quedaban más ficheros por escribir, continúa después con ellos en el mismo formato.",
+                files: contextFiles,
+                activeFile: project.activeFile,
+                mode: opts.mode ?? "edit",
+              },
+              (e) => {
+                if (e.type === "text") {
+                  contText += e.text;
+                  set({ streamText: text + contText });
+                } else if (e.type === "done") {
+                  model = e.model;
+                  usage = e.usage;
+                  stopReason = e.stopReason;
+                }
+              },
+              controller.signal,
+            );
+            contErr = undefined;
+            break;
+          } catch (err) {
+            contErr = err;
+            if ((err as Error).name === "AbortError") throw err;
+            if (!contText && i < contAttempts.length - 1) continue;
+            throw err;
+          }
+        }
+        if (!contErr && contText) {
+          text += contText;
+          parsed = parseFileBlocks(text);
+        }
+      } catch {
+        /* si la continuación también falla, se deja como estaba y se avisa igual que antes */
+      }
+    }
+
     // Solo se aplican cambios si el proyecto activo sigue siendo el mismo
-    const parsed = parseFileBlocks(text);
     const stillSameProject = useStudio.getState().project?.id === project.id;
     const changed = Object.keys(parsed.updated);
     let versionId: string | undefined;

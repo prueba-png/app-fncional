@@ -131,7 +131,7 @@ const CLONE_PROMPT = `Clona EXACTAMENTE la interfaz de los archivos adjuntos: un
 - Recorre la captura de arriba abajo (todas sus partes) y reproduce cada sección, en el mismo orden, con todos sus textos copiados literalmente.
 - Mismas medidas en px CSS (usa el ancho de pantalla estimado), mismos colores exactos, misma tipografía y pesos, mismos bordes, sombras, radios y fondos.
 - Fotos, logotipos (también de marcas conocidas), ilustraciones e iconos complejos: recórtalos de la captura con captura:<id>#x,y,ancho,alto. Nunca los sustituyas por un bloque de color liso, una forma genérica o un SVG inventado: eso cuenta como no haber hecho la tarea.
-- Si la captura es de móvil, el diseño principal es el de móvil; si es de escritorio, el de escritorio. Añade además adaptación responsive sin alterar ese diseño.
+- Si la captura es de móvil, el diseño principal es el de móvil; si es de escritorio, el de escritorio. En cualquier caso, añade reglas @media que reorganicen la maquetación (columnas que se apilan, menú hamburguesa, letra más pequeña) en los demás tamaños de pantalla: nunca dejes que en una pantalla distinta a la de la captura el diseño se vea amontonado, solapado o recortado.
 - Crea una página completa y funcional: index.html, styles.css y script.js.`;
 
 const refinePrompt = (score: number, parts: number) => `Revisión píxel a píxel (parecido actual: ${Math.round(score * 100)} %).
@@ -864,7 +864,8 @@ ${text}
 ${search ? "\n- Antes de construir, BUSCA en internet la información real que necesites (datos, precios, nombres, hechos actuales) y úsala; no te la inventes.\n" : ""}
 - Interpreta la petición de forma literal: si detalla textos, colores, secciones o un orden concreto, respétalo tal cual.
 - Si algo queda ambiguo, elige la interpretación más razonable y dilo en una frase, pero no inventes funciones extra no pedidas.
-- Crea una página completa y funcional: index.html, styles.css y script.js, con HTML semántico y accesible, responsive.
+- Crea una página completa y funcional: index.html, styles.css y script.js, con HTML semántico y accesible.
+- Responsive de verdad: con @media que reorganicen la maquetación (columnas que se apilan, menú hamburguesa) en pantallas estrechas, y sin anchos fijos en los contenedores principales; pruébalo mentalmente tanto en escritorio como en móvil antes de darlo por terminado.
 - Usa contenido de ejemplo realista donde el usuario no haya dado datos concretos.`,
           [],
           [],
