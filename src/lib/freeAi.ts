@@ -11,6 +11,7 @@ import type {
   ChatStreamEvent,
 } from "../../shared/types";
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
+import { sanitizeKey } from "./util";
 import {
   IMPROVE_PROMPT,
   REFERENCE_PROMPT,
@@ -472,6 +473,8 @@ export async function streamGemini(
 ): Promise<void> {
   if (!req.apiKey)
     throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
+  // Por si la clave se guardó antes de limpiar caracteres invisibles del copia-pega, se limpia también aquí
+  req.apiKey = sanitizeKey(req.apiKey);
   let lastLimit = false;
   let lastQuotaDaily = false;
   let lastQuotaEscalated = false;
@@ -744,6 +747,8 @@ export async function streamOpenRouter(
     throw new Error(
       "Falta la clave gratuita de OpenRouter. Añádela en Ajustes.",
     );
+  // Por si la clave se guardó antes de limpiar caracteres invisibles del copia-pega, se limpia también aquí
+  req.apiKey = sanitizeKey(req.apiKey);
   const needsImages = (req.attachments ?? []).some((a) => a.type === "image");
   let last: unknown;
   for (const model of await freeOpenRouterModels(needsImages)) {

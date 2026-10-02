@@ -5,7 +5,7 @@ import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
 import { useChat, improveIdea } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
-import { canResume, resumePrompt, slugify, timeAgo } from "../lib/util";
+import { canResume, resumePrompt, sanitizeKey, slugify, timeAgo } from "../lib/util";
 import { saveFile } from "../lib/runtime";
 import { handleTelegramDbCommand } from "../lib/telegramDbCommand";
 import { readTelegramDbConfig } from "../lib/telegramDb";
@@ -43,7 +43,7 @@ function AiKeyCard({ onSaved, compact }: { onSaved?: () => void; compact?: boole
   const toast = useStudio((s) => s.toast);
   const [key, setKey] = useState("");
   const save = async () => {
-    const clean = key.trim().replace(/\s+/g, "");
+    const clean = sanitizeKey(key);
     const provider = detectProvider(clean);
     if (!provider) {
       toast("Esa clave no parece de Google (empieza por «AIza» o «AQ»). Cópiala completa desde aistudio.google.com.", "error");

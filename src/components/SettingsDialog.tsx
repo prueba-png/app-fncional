@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useStudio } from "../store/studio";
 import type { Settings } from "../db/db";
 import { telegramTest } from "../lib/api";
+import { sanitizeKey } from "../lib/util";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 
@@ -35,9 +36,9 @@ export function SettingsDialog() {
   const close = () => setSettingsOpen(false);
 
   const save = async () => {
-    // Quita también espacios o saltos de línea internos (no solo al principio y al final): un copia-pega
-    // desde el móvil a veces los cuela sin que se note, y eso basta para que la clave no sea válida.
-    const openrouterApiKey = draft.openrouterApiKey.trim().replace(/\s+/g, "");
+    // Quita espacios, saltos de línea y caracteres invisibles (p. ej. de copiar desde una app de notas):
+    // bastan para que la clave parezca idéntica a simple vista pero falle la validación sin motivo aparente.
+    const openrouterApiKey = sanitizeKey(draft.openrouterApiKey);
     if (openrouterApiKey && !/^sk-or-v1-[a-f0-9]{20,}$/i.test(openrouterApiKey)) {
       toast(
         openrouterApiKey.includes("…") || openrouterApiKey.includes("...")
@@ -49,10 +50,10 @@ export function SettingsDialog() {
     }
     await updateSettings({
       ...draft,
-      anthropicApiKey: draft.anthropicApiKey.trim(),
-      geminiApiKey: draft.geminiApiKey.trim(),
+      anthropicApiKey: sanitizeKey(draft.anthropicApiKey),
+      geminiApiKey: sanitizeKey(draft.geminiApiKey),
       openrouterApiKey,
-      telegramToken: draft.telegramToken.trim(),
+      telegramToken: sanitizeKey(draft.telegramToken),
       telegramChatId: draft.telegramChatId.trim(),
       autoBackupMinutes: Math.max(0, Math.round(draft.autoBackupMinutes)),
       proxyUrl: draft.proxyUrl.trim().replace(/\/+$/, ""),

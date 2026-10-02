@@ -1,3 +1,17 @@
+/**
+ * Limpia una clave de API pegada desde otra app (notas, mensajes…): quita espacios y saltos de línea
+ * en los bordes y en medio, y también caracteres invisibles que algunos teclados o apps de notas cuelan
+ * sin que se note (espacio de ancho cero, marcas de dirección de texto, uniones invisibles). Una clave
+ * con uno de estos caracteres parece idéntica a simple vista pero no es un carácter válido de la clave,
+ * así que antes fallaba la validación de forma intermitente y difícil de explicar para quien la copiaba.
+ */
+export function sanitizeKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[​-‏⁠﻿­]/g, "")
+    .replace(/\s+/g, "");
+}
+
 export function uid(prefix = ""): string {
   const rnd = crypto.getRandomValues(new Uint8Array(10));
   return prefix + Array.from(rnd, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 16);
