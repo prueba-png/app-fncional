@@ -339,6 +339,67 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     }
 
+    // A veces el modelo (sobre todo los gratuitos) responde que ya ha hecho el cambio ("He corregido…",
+    // "ya debería funcionar…") pero no incluye ningún bloque <file>: el chat parece contestar, pero nada
+    // se aplica de verdad. Si el texto afirma un cambio y no hay ni un solo fichero ni borrado, se le pide
+    // una vez que devuelva YA los ficheros, en vez de dejar al usuario con un cambio fantasma.
+    const CLAIMS_EDIT_RE = /\b(he (corregido|cambiado|actualizado|solucionado|arreglado|añadido|aplicado|modificado|ajustado|puesto|hecho)|queda (corregido|solucionado|arreglado|listo)|ya (debería|funciona|está))\b/i;
+    if (!parsed.incomplete && !error && !Object.keys(parsed.updated).length && !parsed.deleted.length && !useWeb && !controller.signal.aborted && CLAIMS_EDIT_RE.test(parsed.prose)) {
+      try {
+        set({ status: "Pidiendo el cambio en código (la respuesta anterior no lo incluía)…" });
+        const retryAttempts = buildProviderAttempts(studio);
+        const retryHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
+        let retryText = "";
+        let retryErr: unknown;
+        for (let i = 0; i < retryAttempts.length; i++) {
+          const a = retryAttempts[i];
+          try {
+            retryText = "";
+            await a.run(
+              {
+                apiKey: a.apiKey,
+                model: settings.model,
+                effort: settings.effort,
+                history: retryHistory,
+                prompt:
+                  "Tu respuesta anterior decía que habías aplicado un cambio, pero no incluía ningún bloque <file>: así que, en realidad, no se aplicó nada. Devuelve AHORA el bloque <file> COMPLETO de cada fichero que cambiaste, con el cambio ya hecho, en el formato exacto <file path=\"...\">…</file>. No repitas la explicación, solo los ficheros.",
+                files: contextFiles,
+                activeFile: project.activeFile,
+                mode: opts.mode ?? "edit",
+              },
+              (e) => {
+                if (e.type === "text") {
+                  retryText += e.text;
+                  set({ streamText: retryText });
+                } else if (e.type === "done") {
+                  model = e.model;
+                  usage = e.usage;
+                  stopReason = e.stopReason;
+                }
+              },
+              controller.signal,
+            );
+            retryErr = undefined;
+            break;
+          } catch (err) {
+            retryErr = err;
+            if ((err as Error).name === "AbortError") throw err;
+            if (!retryText && i < retryAttempts.length - 1) continue;
+            throw err;
+          }
+        }
+        if (!retryErr && retryText) {
+          const retryParsed = parseFileBlocks(retryText);
+          if (Object.keys(retryParsed.updated).length || retryParsed.deleted.length) {
+            text += `\n${retryText}`;
+            parsed = parseFileBlocks(text);
+          }
+        }
+      } catch {
+        /* si el reintento tampoco trae ficheros, se deja el texto como estaba (se avisará más abajo) */
+      }
+    }
+
     // Solo se aplican cambios si el proyecto activo sigue siendo el mismo
     const stillSameProject = useStudio.getState().project?.id === project.id;
     const changed = Object.keys(parsed.updated);
@@ -363,6 +424,10 @@ export const useChat = create<ChatState>((set, get) => ({
     }
     if (parsed.incomplete && !error) {
       error = stopReason === "max_tokens" ? "La respuesta se truncó por longitud; algún fichero no se aplicó." : "Un bloque de fichero quedó incompleto y no se aplicó.";
+    } else if (!error && !changed.length && !parsed.deleted.length && CLAIMS_EDIT_RE.test(parsed.prose)) {
+      // Ni la respuesta original ni el reintento trajeron ficheros: se avisa en vez de dejar un "cambio
+      // fantasma" (la IA dice que lo hizo, pero la vista previa sigue exactamente igual que antes).
+      error = "La IA dijo que había aplicado el cambio, pero no llegó a escribir el código. Prueba a pedirlo de nuevo, quizá con otras palabras.";
     }
 
     const assistantMsg: ChatMessage = {
