@@ -339,12 +339,13 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     }
 
-    // A veces el modelo (sobre todo los gratuitos) responde que ya ha hecho el cambio ("He corregido…",
-    // "ya debería funcionar…") pero no incluye ningún bloque <file>: el chat parece contestar, pero nada
-    // se aplica de verdad. Si el texto afirma un cambio y no hay ni un solo fichero ni borrado, se le pide
-    // una vez que devuelva YA los ficheros, en vez de dejar al usuario con un cambio fantasma.
-    const CLAIMS_EDIT_RE = /\b(he (corregido|cambiado|actualizado|solucionado|arreglado|añadido|aplicado|modificado|ajustado|puesto|hecho)|queda (corregido|solucionado|arreglado|listo)|ya (debería|funciona|está))\b/i;
-    if (!parsed.incomplete && !error && !Object.keys(parsed.updated).length && !parsed.deleted.length && !useWeb && !controller.signal.aborted && CLAIMS_EDIT_RE.test(parsed.prose)) {
+    // Cada mensaje que se manda aquí es siempre una instrucción para cambiar el proyecto (esta app no tiene
+    // un chat de preguntas sueltas): si el modelo (sobre todo los gratuitos) responde con texto —a veces
+    // diciendo que ya lo ha hecho ("He corregido…"), a veces solo explicando lo que va a hacer y cortando
+    // ahí— pero no incluye ningún bloque <file>, el chat parece contestar, pero nada se aplica de verdad.
+    // Mientras haya texto de verdad (no una respuesta vacía) y ni un fichero ni un borrado, se le pide una
+    // vez que devuelva YA el código, en vez de dejar al usuario con un cambio fantasma.
+    if (!parsed.incomplete && !error && !Object.keys(parsed.updated).length && !parsed.deleted.length && !useWeb && !controller.signal.aborted && parsed.prose.trim().length > 0) {
       try {
         set({ status: "Pidiendo el cambio en código (la respuesta anterior no lo incluía)…" });
         const retryAttempts = buildProviderAttempts(studio);
@@ -362,7 +363,7 @@ export const useChat = create<ChatState>((set, get) => ({
                 effort: settings.effort,
                 history: retryHistory,
                 prompt:
-                  "Tu respuesta anterior decía que habías aplicado un cambio, pero no incluía ningún bloque <file>: así que, en realidad, no se aplicó nada. Devuelve AHORA el bloque <file> COMPLETO de cada fichero que cambiaste, con el cambio ya hecho, en el formato exacto <file path=\"...\">…</file>. No repitas la explicación, solo los ficheros.",
+                  "Tu respuesta anterior no incluía ningún bloque <file>, así que en realidad no se aplicó ningún cambio al proyecto (da igual lo que dijeras o planearas hacer). Devuelve AHORA el bloque <file> COMPLETO de cada fichero que haya que cambiar, con el cambio ya hecho, en el formato exacto <file path=\"...\">…</file>. No repitas la explicación ni digas lo que vas a hacer: hazlo y entrega solo los ficheros.",
                 files: contextFiles,
                 activeFile: project.activeFile,
                 mode: opts.mode ?? "edit",
@@ -424,10 +425,10 @@ export const useChat = create<ChatState>((set, get) => ({
     }
     if (parsed.incomplete && !error) {
       error = stopReason === "max_tokens" ? "La respuesta se truncó por longitud; algún fichero no se aplicó." : "Un bloque de fichero quedó incompleto y no se aplicó.";
-    } else if (!error && !changed.length && !parsed.deleted.length && CLAIMS_EDIT_RE.test(parsed.prose)) {
+    } else if (!error && !changed.length && !parsed.deleted.length && parsed.prose.trim().length > 0) {
       // Ni la respuesta original ni el reintento trajeron ficheros: se avisa en vez de dejar un "cambio
-      // fantasma" (la IA dice que lo hizo, pero la vista previa sigue exactamente igual que antes).
-      error = "La IA dijo que había aplicado el cambio, pero no llegó a escribir el código. Prueba a pedirlo de nuevo, quizá con otras palabras.";
+      // fantasma" (la IA contesta con texto, pero la vista previa sigue exactamente igual que antes).
+      error = "La IA respondió con texto pero no llegó a escribir el código del cambio. Prueba a pedirlo de nuevo, quizá con otras palabras.";
     }
 
     const assistantMsg: ChatMessage = {
