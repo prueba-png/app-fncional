@@ -420,7 +420,77 @@ export const useChat = create<ChatState>((set, get) => ({
           /* sin recortes: se aplica tal cual */
         }
       }
-      const v = await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
+      let v = await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
+      if (!v && !controller.signal.aborted) {
+        // El fichero que devolvió la IA es BYTE A BYTE idéntico al que ya había (formato correcto, pero
+        // ningún cambio real): sin esto, el chat decía "Aplicados N cambios" aunque la vista previa se
+        // quedara exactamente igual. Se le pide una vez que identifique de verdad qué había que cambiar.
+        try {
+          set({ status: "Ese fichero no cambió nada de verdad: pidiendo que lo corrija otra vez…" });
+          const retry2Attempts = buildProviderAttempts(studio);
+          const retry2History: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
+          let retry2Text = "";
+          let retry2Err: unknown;
+          for (let i = 0; i < retry2Attempts.length; i++) {
+            const a = retry2Attempts[i];
+            try {
+              retry2Text = "";
+              await a.run(
+                {
+                  apiKey: a.apiKey,
+                  model: settings.model,
+                  effort: settings.effort,
+                  history: retry2History,
+                  prompt:
+                    "El/los fichero(s) que devolviste en tu respuesta anterior son exactamente iguales a los que ya había en el proyecto: no cambiaste nada de verdad, aunque el formato fuera correcto. Vuelve a leer con atención lo que pedí y devuelve el fichero YA modificado de verdad (con una diferencia real respecto al original), en el mismo formato <file path=\"...\">…</file>.",
+                  files: contextFiles,
+                  activeFile: project.activeFile,
+                  mode: opts.mode ?? "edit",
+                },
+                (e) => {
+                  if (e.type === "text") {
+                    retry2Text += e.text;
+                    set({ streamText: retry2Text });
+                  } else if (e.type === "done") {
+                    model = e.model;
+                    usage = e.usage;
+                    stopReason = e.stopReason;
+                  }
+                },
+                controller.signal,
+              );
+              retry2Err = undefined;
+              break;
+            } catch (err) {
+              retry2Err = err;
+              if ((err as Error).name === "AbortError") throw err;
+              if (!retry2Text && i < retry2Attempts.length - 1) continue;
+              throw err;
+            }
+          }
+          if (!retry2Err && retry2Text) {
+            const retry2Parsed = parseFileBlocks(retry2Text);
+            if (Object.keys(retry2Parsed.updated).length || retry2Parsed.deleted.length) {
+              text += `\n${retry2Text}`;
+              parsed = parseFileBlocks(text);
+              let toWrite2 = restoreDataUris(parsed.updated, dataUriRestore);
+              let toDelete2 = parsed.deleted;
+              if (hasCaptureRefs(toWrite2)) {
+                try {
+                  const crops = await resolveCrops(toWrite2, useStudio.getState().project!.files, project.id);
+                  toWrite2 = crops.updated;
+                  toDelete2 = [...new Set([...toDelete2, ...crops.deleted])];
+                } catch {
+                  /* sin recortes: se aplica tal cual */
+                }
+              }
+              v = await useStudio.getState().applyChanges(toWrite2, toDelete2, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
+            }
+          }
+        } catch {
+          /* si el reintento tampoco trae un cambio real, se avisa igual que antes (ver más abajo) */
+        }
+      }
       versionId = v?.id;
     }
     if (parsed.incomplete && !error) {
@@ -429,6 +499,10 @@ export const useChat = create<ChatState>((set, get) => ({
       // Ni la respuesta original ni el reintento trajeron ficheros: se avisa en vez de dejar un "cambio
       // fantasma" (la IA contesta con texto, pero la vista previa sigue exactamente igual que antes).
       error = "La IA respondió con texto pero no llegó a escribir el código del cambio. Prueba a pedirlo de nuevo, quizá con otras palabras.";
+    } else if (!error && (changed.length || parsed.deleted.length) && !versionId) {
+      // Se devolvieron ficheros con el formato correcto, pero ni la respuesta original ni el reintento
+      // cambiaron nada respecto a lo que ya había: se avisa en vez de decir "Aplicados" sin ser cierto.
+      error = "La IA devolvió el fichero sin ningún cambio real. Prueba a describir el cambio de otra forma (indicando el elemento exacto que quieres modificar).";
     }
 
     const assistantMsg: ChatMessage = {
@@ -445,7 +519,8 @@ export const useChat = create<ChatState>((set, get) => ({
 
     const studioNow = useStudio.getState();
     if (error) studioNow.toast(error, "error");
-    else if (changed.length || parsed.deleted.length)
-      studioNow.toast(`Aplicados ${changed.length + parsed.deleted.length} cambio(s) de fichero`, "success");
+    // Solo se avisa de éxito si de verdad se creó una versión nueva (versionId): con ficheros idénticos a
+    // los que ya había, "changed"/"deleted" pueden no estar vacíos aunque no haya cambiado nada de verdad.
+    else if (versionId) studioNow.toast(`Aplicados ${changed.length + parsed.deleted.length} cambio(s) de fichero`, "success");
   },
 }));
