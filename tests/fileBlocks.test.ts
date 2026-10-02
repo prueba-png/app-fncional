@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFileBlocks, sanitizePath, summarizeFileBlocks } from "../shared/fileBlocks";
+import { omitLargeDataUris, parseFileBlocks, restoreDataUris, sanitizePath, summarizeFileBlocks } from "../shared/fileBlocks";
 
 describe("parseFileBlocks", () => {
   it("extrae ficheros completos, eliminaciones y prosa", () => {
@@ -27,5 +27,47 @@ describe("parseFileBlocks", () => {
 
   it("resume los bloques para el historial", () => {
     expect(summarizeFileBlocks(`Ok\n<file path="a.css">x</file>`)).toBe("Ok\n[fichero actualizado: a.css]");
+  });
+});
+
+describe("omitLargeDataUris / restoreDataUris", () => {
+  const bigFont = `data:font/woff2;base64,${"A".repeat(400)}`;
+
+  it("omite una data: URL incrustada en un fichero de texto (una fuente en un @font-face) si es grande", () => {
+    const css = `@font-face{src:url(${bigFont});}\nbody{color:red}`;
+    const { files, restore } = omitLargeDataUris({ "styles.css": css });
+    expect(files["styles.css"]).not.toContain(bigFont);
+    expect(files["styles.css"]).toContain("body{color:red}");
+    expect(files["styles.css"].length).toBeLessThan(css.length / 2);
+    expect(restore.size).toBe(1);
+  });
+
+  it("no toca un fichero que ES por completo una data: URL (un recorte de captura guardado como su propio fichero)", () => {
+    const { files, restore } = omitLargeDataUris({ "recortes/logo.png": bigFont });
+    expect(files["recortes/logo.png"]).toBe(bigFont);
+    expect(restore.size).toBe(0);
+  });
+
+  it("no omite data: URLs pequeñas (el marcador no ahorraría nada)", () => {
+    const small = "data:image/png;base64,AAAA";
+    const { files, restore } = omitLargeDataUris({ "a.css": `background:url(${small})` });
+    expect(files["a.css"]).toContain(small);
+    expect(restore.size).toBe(0);
+  });
+
+  it("repone el dato real si el fichero vuelve sin tocar esa parte", () => {
+    const css = `@font-face{src:url(${bigFont});}\nbody{color:red}`;
+    const { files, restore } = omitLargeDataUris({ "styles.css": css });
+    // La IA cambia solo el color, deja el marcador de la fuente tal cual
+    const aiReturned = files["styles.css"].replace("color:red", "color:blue");
+    const restored = restoreDataUris({ "styles.css": aiReturned }, restore);
+    expect(restored["styles.css"]).toBe(css.replace("color:red", "color:blue"));
+  });
+
+  it("si la IA sí cambia esa parte (ya no está el marcador), no repone nada encima", () => {
+    const css = `@font-face{src:url(${bigFont});}\nbody{color:red}`;
+    const { restore } = omitLargeDataUris({ "styles.css": css });
+    const aiReturned = { "styles.css": "body{color:blue}" }; // la IA quitó la fuente a propósito
+    expect(restoreDataUris(aiReturned, restore)).toEqual(aiReturned);
   });
 });

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { hasCaptureRefs, resolveCrops } from "../lib/crops";
 import { memoryAttachments, refersToOriginal } from "../lib/references";
 import type { ChatAttachment, ChatTurn } from "../../shared/types";
-import { parseFileBlocks } from "../../shared/fileBlocks";
+import { omitLargeDataUris, parseFileBlocks, restoreDataUris } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { ChatMessage } from "../db/db";
 import { streamChat } from "../lib/api";
@@ -187,6 +187,12 @@ export const useChat = create<ChatState>((set, get) => ({
     let stopReason: string | null = null;
     let error: string | undefined;
 
+    // Imágenes o fuentes incrustadas a mitad de un fichero (p. ej. un @font-face en base64) pueden pesar
+    // cientos de miles de caracteres sin que la IA necesite verlas para un cambio de texto o color: se
+    // omiten del envío (y se reponen después si el fichero vuelve sin tocar esa parte), para no superar el
+    // límite de tamaño de la petición por datos que la IA ni necesitaba leer.
+    const { files: contextFiles, restore: dataUriRestore } = omitLargeDataUris(useStudio.getState().project!.files);
+
     try {
       await useStudio.getState().flush();
       const sample = useWeb ? await getSample() : null;
@@ -198,7 +204,7 @@ export const useChat = create<ChatState>((set, get) => ({
           {
             history,
             prompt: userMsg.content,
-            files: useStudio.getState().project!.files,
+            files: contextFiles,
             activeFile: project.activeFile,
             attachments,
             mode: opts.mode ?? "edit",
@@ -242,7 +248,7 @@ export const useChat = create<ChatState>((set, get) => ({
                 effort: opts.effort && rank(opts.effort) > rank(settings.effort) ? opts.effort : settings.effort,
                 history,
                 prompt: userMsg.content,
-                files: useStudio.getState().project!.files,
+                files: contextFiles,
                 activeFile: project.activeFile,
                 attachments,
                 mode: opts.mode ?? "edit",
@@ -282,8 +288,10 @@ export const useChat = create<ChatState>((set, get) => ({
     const changed = Object.keys(parsed.updated);
     let versionId: string | undefined;
     if (stillSameProject && (changed.length || parsed.deleted.length)) {
+      // Repone los datos reales que se omitieron del envío (fuentes/imágenes incrustadas), si el fichero
+      // volvió sin tocar esa parte; si la IA sí la cambió, ya no queda el marcador y no se repone nada.
+      let toWrite = restoreDataUris(parsed.updated, dataUriRestore);
       // Las imágenes que la IA toma de la captura (captura:…) se recortan y se guardan como ficheros
-      let toWrite = parsed.updated;
       let toDelete = parsed.deleted;
       if (hasCaptureRefs(toWrite)) {
         try {
