@@ -248,7 +248,10 @@ export async function fetchSiteScreenshot(url: string, timeoutMs = 30_000): Prom
     });
   const sources: Array<() => Promise<string>> = [
     async () => {
-      const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&viewport.width=1280&viewport.height=800&screenshot.fullPage=true&waitForTimeout=1500`;
+      // Las webs hechas con JavaScript tardan en pintarse: una espera corta capturaría la pantalla a medio
+      // cargar (en blanco o con un spinner), lo que luego hace que la comparación visual salga mal por una
+      // captura de referencia incorrecta, no por el clon.
+      const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&viewport.width=1280&viewport.height=800&screenshot.fullPage=true&waitForTimeout=3500`;
       const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs), credentials: "omit" });
       const json = (await res.json()) as { status?: string; data?: { screenshot?: { url?: string } } };
       const shot = json?.data?.screenshot?.url;

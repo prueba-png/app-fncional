@@ -540,7 +540,7 @@ export const useEasy = create<EasyState>((set, get) => {
               const blob = await (await fetch(shot.dataUrl)).blob();
               const ref = await processReferenceFile(new File([blob], `${host}.jpg`, { type: blob.type || "image/jpeg" }), useStudio.getState().project!.id);
               await db.saveReference(ref);
-              refineNote = await refineAgainst(ref, 1);
+              refineNote = await refineAgainst(ref, 2);
             }
           } catch {
             /* si la captura real o el afinado fallan, se deja el clon tal cual (ya es fiel al HTML pintado) */
@@ -633,7 +633,7 @@ ${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : "
             note: ref
               ? undefined
               : "No se pudo descargar el código original de esta web, así que la IA la ha reconstruido a partir de su contenido: los textos son fieles y el diseño puede variar. Para más exactitud, sube también una captura.",
-            refine: ref && get().precision === "exact" ? () => refineAgainst(ref!) : undefined,
+            refine: ref && get().precision === "exact" ? () => refineAgainst(ref!, 2) : undefined,
           },
         );
       } catch (err) {
@@ -788,7 +788,7 @@ ${CLONE_PROMPT}
 
 Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiempos o transiciones (por ejemplo un splash), impleméntalo con HTML/CSS/JS y usa las imágenes reales recortándolas de las capturas (captura:<id>#x,y,ancho,alto) o mostrándolas completas según convenga.`
           : CLONE_PROMPT;
-        const refine = !instruction && get().precision === "exact" && target ? () => refineAgainst(target) : undefined;
+        const refine = !instruction && get().precision === "exact" && target ? () => refineAgainst(target, 2) : undefined;
         await runAi(prompt, all, labels, { refine });
       } catch (err) {
         fail(friendlyAiError((err as Error).message));

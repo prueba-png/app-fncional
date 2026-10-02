@@ -31,8 +31,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 async function crop(src: string, x: number, y: number, w: number, h: number): Promise<string | null> {
   const img = await loadImage(src);
-  const cx = Math.max(0, Math.min(x, img.naturalWidth - 1));
-  const cy = Math.max(0, Math.min(y, img.naturalHeight - 1));
+  // La IA calcula estas coordenadas a ojo (puede pasarse por unos píxeles cerca de un borde): se desplaza
+  // el recorte lo justo para que el rectángulo pedido quepa entero en la imagen, en vez de truncarlo a casi
+  // nada (que es lo que antes producía recortes vacíos y, por tanto, el bloque de color de reserva).
+  const cx = Math.max(0, Math.min(x, Math.max(0, img.naturalWidth - w)));
+  const cy = Math.max(0, Math.min(y, Math.max(0, img.naturalHeight - h)));
   const cw = Math.min(w, img.naturalWidth - cx);
   const ch = Math.min(h, img.naturalHeight - cy);
   if (cw < 2 || ch < 2) return null;
