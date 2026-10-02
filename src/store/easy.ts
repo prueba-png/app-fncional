@@ -527,14 +527,34 @@ export const useEasy = create<EasyState>((set, get) => {
         });
         // Un clon exacto no debe recibir librerías añadidas automáticamente (cambiarían su aspecto)
         useStudio.getState().setAutoInjectDeps(false);
+        // Cuando la web se generaba con JavaScript, lo que se guardó es una foto fija de cómo la pintó un
+        // navegador (sin sus scripts): se compara con una captura real de la web viva y se corrigen
+        // diferencias, igual que ya se hace con las capturas subidas a mano, para no quedarse solo con la
+        // aproximación. Funciona con cualquier IA configurada (gratuita u de pago), no hace falta nada especial.
+        const paintedSnapshot = result.warnings.some((w) => w.includes("ya pintada por un navegador"));
+        let refineNote: string | undefined;
+        if (paintedSnapshot && keepScripts && aiAvailable(useStudio.getState())) {
+          try {
+            const shot = await fetchSiteScreenshot(result.finalUrl);
+            if (shot && get().stage === "working") {
+              const blob = await (await fetch(shot.dataUrl)).blob();
+              const ref = await processReferenceFile(new File([blob], `${host}.jpg`, { type: blob.type || "image/jpeg" }), useStudio.getState().project!.id);
+              await db.saveReference(ref);
+              refineNote = await refineAgainst(ref, 1);
+            }
+          } catch {
+            /* si la captura real o el afinado fallan, se deja el clon tal cual (ya es fiel al HTML pintado) */
+          }
+        }
         // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
         // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
         // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
-        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado/i;
+        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador/i;
+        if (refineNote) note = refineNote;
         if (!note) {
           const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));
           if (serious.length) note = `Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto: ${serious[0]}`;
-          else if (result.warnings.length) note = result.warnings[0];
+          else if (result.warnings.length) note = paintedSnapshot ? "Esta web se genera con JavaScript; se comparó el clon con la web real para corregir diferencias." : result.warnings[0];
         }
         abortController = null;
         // Si diste una instrucción («júntalo con…», «cambia…»), se aplica sobre el clon descargado
