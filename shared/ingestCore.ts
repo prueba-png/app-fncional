@@ -286,7 +286,7 @@ async function fetchStylesheetResult(
 
 /** Solo en la versión sin scripts: contenidos con animación de entrada que dependen de JavaScript */
 const STATIC_FIXES = `
-/* ── DevStudio: la versión sin scripts muestra los elementos que se animan al hacer scroll ── */
+/* ── Ganx: la versión sin scripts muestra los elementos que se animan al hacer scroll ── */
 [data-aos], [data-sal], .wow, .aos-init, [data-scroll-reveal], .reveal, .js-reveal, [data-animate] { opacity: 1 !important; transform: none !important; visibility: visible !important; }
 `;
 
@@ -567,7 +567,7 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
     head.append('\n<link rel="stylesheet" href="styles.css">\n');
     $doc("body").append('\n<script src="script.js"></script>\n');
     return {
-      "index.html": formatHtml(`<!-- Réplica de estudio generada por DevStudio Pro a partir de ${res.finalUrl} -->\n` + $doc.html()),
+      "index.html": formatHtml(`<!-- Réplica de estudio generada por Ganx a partir de ${res.finalUrl} -->\n` + $doc.html()),
       // Sin scripts, los contenidos que aparecen «al hacer scroll» se quedarían invisibles: se muestran
       "styles.css": `/* Estilos extraídos de ${res.finalUrl} — ${new Date().toISOString()} */\n\n${stylesCss}\n${withScripts ? "" : STATIC_FIXES}`,
       "script.js": withScripts ? "// Los scripts originales se conservan en index.html.\n" : scriptsNote,

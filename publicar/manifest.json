@@ -1,6 +1,6 @@
 {
-  "name": "DevStudio Pro",
-  "short_name": "DevStudio",
+  "name": "Ganx",
+  "short_name": "Ganx",
   "description": "Clona webs, capturas y vídeos, o crea páginas nuevas con IA, y guárdalas en tu dispositivo.",
   "start_url": "./",
   "scope": "./",

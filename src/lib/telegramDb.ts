@@ -53,7 +53,7 @@ export function buildTelegramDbScript(cfg: TelegramDbConfig, projectName: string
   const conf = JSON.stringify({ token: cfg.token.trim(), chatId: cfg.chatId.trim(), project: projectName }, null, 2)
     .replace(/"(\w+)":/g, "$1:");
   return `/*
- * Base de datos en Telegram (generado por DevStudio Pro).
+ * Base de datos en Telegram (generado por Ganx).
  * Cada formulario de la página envía sus datos a tu chat de Telegram.
  * - Para que un formulario NO se envíe, añádele data-telegram="off".
  * - Para enviar datos desde tu propio código: TelegramDB.send({ campo: "valor" }, "Título").

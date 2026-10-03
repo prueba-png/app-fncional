@@ -69,7 +69,7 @@ export function createApp() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   createApp().listen(PORT, HOST, () => {
-    console.log(`\n  DevStudio Pro · servidor local en http://${HOST}:${PORT}`);
+    console.log(`\n  Ganx · servidor local en http://${HOST}:${PORT}`);
     if (!isProd) console.log("  Interfaz de desarrollo: http://127.0.0.1:5173\n");
     else if (!existsSync(distDir)) console.log("  Aviso: no existe dist/. Ejecuta `npm run build` primero.\n");
   });

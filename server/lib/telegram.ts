@@ -63,7 +63,7 @@ export async function telegramTest(body: { token?: unknown; chatId?: unknown }):
   const chat = await callApi<TgChat>(token, "getChat", { chat_id: String(body.chatId).trim() });
   await callApi(token, "sendMessage", {
     chat_id: chat.id,
-    text: "✅ DevStudio Pro conectado. Este chat se usará como repositorio de copias de seguridad.",
+    text: "✅ Ganx conectado. Este chat se usará como repositorio de copias de seguridad.",
     disable_notification: true,
   });
   return {

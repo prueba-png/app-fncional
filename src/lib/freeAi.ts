@@ -652,7 +652,7 @@ async function openRouterOnce(
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${req.apiKey}`,
-      "X-Title": "DevStudio Pro",
+      "X-Title": "Ganx",
     },
     // Sin max_tokens, muchos backends gratuitos de OpenRouter usan un límite de salida por defecto muy
     // bajo (a veces 1-2 mil tokens), cortando la página a medias (un fichero completo y el resto vacío).

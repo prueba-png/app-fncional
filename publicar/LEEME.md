@@ -1,4 +1,4 @@
-# DevStudio Pro en un solo archivo
+# Ganx en un solo archivo
 
 `index.html` contiene la aplicación completa (interfaz, estilos y código). No necesita servidor ni instalación.
 

@@ -1,5 +1,5 @@
 /*
- * DevStudio Pro — proxy de descarga (Cloudflare Worker, plan gratuito).
+ * Ganx — proxy de descarga (Cloudflare Worker, plan gratuito).
  *
  * Sirve para clonar webs PÚBLICAS por enlace sin depender de servicios de
  * terceros. Descarga la dirección que se le pide y la devuelve con permiso de
@@ -10,7 +10,7 @@
  *   2. Menú «Workers & Pages» → «Create» → «Create Worker» → «Deploy».
  *   3. Pulsa «Edit code», borra lo que haya y pega TODO este archivo. «Deploy».
  *   4. Copia la dirección que te da (algo como https://TU-NOMBRE.workers.dev).
- *   5. En DevStudio Pro → Ajustes → «Mi servidor de descarga», pega esa
+ *   5. En Ganx → Ajustes → «Mi servidor de descarga», pega esa
  *      dirección y guarda. Listo: los clones por enlace usarán tu servidor.
  *
  * Nota: solo descarga páginas públicas. No sirve para páginas con inicio de

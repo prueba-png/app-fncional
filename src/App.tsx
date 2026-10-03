@@ -72,7 +72,7 @@ export function App() {
     return (
       <div className="loading-screen">
         <div className="row">
-          <span className="spinner" /> Cargando DevStudio Pro…
+          <span className="spinner" /> Cargando Ganx…
         </div>
       </div>
     );

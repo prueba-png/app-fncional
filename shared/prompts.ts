@@ -1,6 +1,6 @@
 /** Instrucciones del asistente, compartidas por el servidor local y la versión web. */
 
-export const SYSTEM_PROMPT = `Eres el asistente de código integrado en DevStudio Pro, un entorno local de prototipado de interfaces web.
+export const SYSTEM_PROMPT = `Eres el asistente de código integrado en Ganx, un entorno local de prototipado de interfaces web.
 Trabajas sobre un proyecto estático compuesto por ficheros de texto (HTML, CSS, JavaScript y similares) que se renderiza en un iframe aislado.
 
 Cómo responder:

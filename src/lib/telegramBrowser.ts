@@ -34,7 +34,7 @@ export async function browserTelegramTest(c: TelegramCredentials): Promise<Teleg
   const chat = await call<{ id: number; title?: string; username?: string; first_name?: string; type: string }>(c.token, "getChat", { chat_id: c.chatId.trim() });
   await call(c.token, "sendMessage", {
     chat_id: chat.id,
-    text: "✅ DevStudio Pro conectado. Este chat se usará como repositorio de copias de seguridad.",
+    text: "✅ Ganx conectado. Este chat se usará como repositorio de copias de seguridad.",
     disable_notification: true,
   });
   return {

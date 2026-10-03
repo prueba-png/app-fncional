@@ -52,7 +52,7 @@ export async function exportSourceZip(project: Project): Promise<Blob> {
   if (!("README.md" in project.files)) {
     zip.file(
       "README.md",
-      `# ${project.name}\n\nExportado desde DevStudio Pro el ${new Date().toLocaleString("es")}.\n\n` +
+      `# ${project.name}\n\nExportado desde Ganx el ${new Date().toLocaleString("es")}.\n\n` +
         `Abre \`index.html\` en el navegador o sirve la carpeta con cualquier servidor estático, por ejemplo:\n\n` +
         "```bash\nnpx serve .\n```\n" +
         (project.origin.type === "url" && project.origin.detail ? `\nOrigen del análisis: ${project.origin.detail}\n` : ""),
@@ -61,7 +61,7 @@ export async function exportSourceZip(project: Project): Promise<Blob> {
   return zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-/** Paquete de respaldo completo, reimportable en DevStudio Pro. */
+/** Paquete de respaldo completo, reimportable en Ganx. */
 export async function createBackupBundle(bundles: ProjectBundle[]): Promise<Blob> {
   const zip = new JSZip();
   const used = new Set<string>();
@@ -69,7 +69,7 @@ export async function createBackupBundle(bundles: ProjectBundle[]): Promise<Blob
     format: BUNDLE_FORMAT,
     version: BUNDLE_VERSION,
     createdAt: new Date().toISOString(),
-    app: "DevStudio Pro 1.0.0",
+    app: "Ganx 1.0.0",
     projects: [],
   };
   for (const b of bundles) {
@@ -102,7 +102,7 @@ export async function readZip(blob: Blob, fallbackName: string): Promise<{ kind:
   const manifestFile = zip.file(MANIFEST);
   if (manifestFile) {
     const manifest = JSON.parse(await manifestFile.async("string")) as BundleManifest;
-    if (manifest.format !== BUNDLE_FORMAT) throw new Error("El ZIP no es un paquete de DevStudio Pro reconocido.");
+    if (manifest.format !== BUNDLE_FORMAT) throw new Error("El ZIP no es un paquete de Ganx reconocido.");
     const bundles: ProjectBundle[] = [];
     for (const entry of manifest.projects) {
       const meta = await readJson<Omit<Project, "files">>(zip, `${entry.folder}/project.json`, null as never);

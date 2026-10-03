@@ -28,11 +28,11 @@ export function TopBar() {
   };
 
   const logo = (
-    <button className="logo" onClick={() => mode === "easy" && useEasy.getState().goHome()} aria-label="DevStudio Pro, ir al inicio">
+    <button className="logo" onClick={() => mode === "easy" && useEasy.getState().goHome()} aria-label="Ganx, ir al inicio">
       <span className="logo-mark">
         <Icon name="bolt" size={15} />
       </span>
-      DevStudio <small>Pro</small>
+      Ganx
     </button>
   );
   const modeToggle = (
