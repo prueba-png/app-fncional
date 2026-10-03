@@ -557,10 +557,15 @@ export const useEasy = create<EasyState>((set, get) => {
           else if (result.warnings.length) note = paintedSnapshot ? "Esta web se genera con JavaScript; se comparó el clon con la web real para corregir diferencias." : result.warnings[0];
         }
         abortController = null;
-        // Si diste una instrucción («júntalo con…», «cambia…»), se aplica sobre el clon descargado
+        // Si diste una instrucción («júntalo con…», «cambia…», «instala solo el formulario de contacto»),
+        // se aplica sobre el clon descargado. Se deja claro que el código ya descargado es el real de la
+        // web (no hay que inventarlo) y que si la instrucción pide una parte concreta, hay que quedarse
+        // solo con esa parte y quitar el resto, no limitarse a resaltarla o añadirla a la página completa.
         if (instruction && aiAvailable(useStudio.getState())) {
           finish(note);
-          await useChat.getState().send(instruction);
+          await useChat.getState().send(
+            `El proyecto ya contiene el código real descargado de ${result.finalUrl} (no lo inventes ni lo reconstruyas de memoria: está en los ficheros del proyecto). Ahora aplica esta instrucción del usuario: "${instruction}". Si pide una parte concreta de la página (un formulario, una sección, un menú…), identifica ese fragmento exacto en el código descargado y deja el proyecto SOLO con esa parte (quita el resto), no te limites a señalarla o a añadir algo nuevo junto a la página completa.`,
+          );
           return;
         }
         finish(note);
@@ -622,7 +627,7 @@ export const useEasy = create<EasyState>((set, get) => {
         }
         await runAi(
           `Clona ${url} con la máxima fidelidad, como una copia píxel a píxel.
-${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : ""}${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (estructura, medidas, colores, tipografía, imágenes) siguiendo las reglas de referencia visual.\n" : ""}- Usa la herramienta web_fetch para leer ${url} y copiar literalmente sus textos, enlaces y navegación.
+${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}. Si pide una parte concreta de la página (un formulario, una sección, un menú…), busca ESA parte exacta dentro de la web y quédate solo con ella (no entregues la página completa salvo que lo pida).\n` : ""}${ref ? "- Te adjunto una captura real de la página: copia su diseño EXACTO (estructura, medidas, colores, tipografía, imágenes) siguiendo las reglas de referencia visual.\n" : ""}- Usa la herramienta web_fetch para leer ${url} y copiar literalmente sus textos, enlaces y navegación.
 - Usa las imágenes de la página por su URL absoluta cuando aparezcan${ref ? " o recórtalas de la captura con captura:<id>#x,y,ancho,alto" : ""}.
 - Crea una página completa: index.html, styles.css y script.js, responsive.
 - Si no puedes leer la página, dilo claramente en la explicación y no inventes su contenido.`,

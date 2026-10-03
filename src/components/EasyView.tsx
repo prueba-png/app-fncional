@@ -496,15 +496,22 @@ function AskScreen() {
         "Junta las dos imágenes en la misma página, una debajo de otra",
         "Muestra la primera imagen 2 segundos, haz un splash y luego la segunda",
       ]
-    : ["Clónala tal cual", "Clónala y pon el menú en español", "Clónala pero cambia los colores a tonos azules"];
+    : [
+        "Clónala tal cual, toda la página",
+        "Instala solo el formulario de contacto",
+        "Instala solo la sección de precios",
+        "Clónala pero cambia los colores a tonos azules",
+      ];
 
   return (
     <div className="easy-start ask-screen">
       <header className="easy-hero">
         <h1>¿Qué quieres que haga?</h1>
         <p className="muted">
-          {isFiles ? `Con ${pending.label}. ` : `Con ${pending.label}. `}
-          Escribe lo que quieres (o déjalo vacío para clonarlo tal cual) y pulsa «Crear».
+          Con {pending.label}.{" "}
+          {isFiles
+            ? "Escribe lo que quieres (o déjalo vacío para clonarlo tal cual) y pulsa «Crear»."
+            : "¿Quieres toda la página o solo una parte concreta (un formulario, una sección, un menú)? Escríbelo (o déjalo vacío para clonarla entera) y pulsa «Crear»."}
         </p>
       </header>
 
@@ -521,7 +528,11 @@ function AskScreen() {
 
       <textarea
         className="textarea ask-instruction"
-        placeholder={isFiles ? "Ej.: junta estas dos capturas; muestra la primera 2 s y luego la segunda con un splash" : "Ej.: clónala tal cual, o dime qué cambiar"}
+        placeholder={
+          isFiles
+            ? "Ej.: junta estas dos capturas; muestra la primera 2 s y luego la segunda con un splash"
+            : "Ej.: clónala tal cual · instala solo el formulario de contacto · instala solo la sección de precios"
+        }
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}
         autoFocus
