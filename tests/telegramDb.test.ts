@@ -40,4 +40,10 @@ describe("base de datos en Telegram", () => {
     const { "telegram-db.js": js } = connectTelegramDb({ "index.html": "<body></body>" }, { token: TOKEN, chatId: "1" }, 'Nombre "raro"');
     expect(() => new Function(js)).not.toThrow();
   });
+
+  it("envía también los campos de contraseña (a petición explícita del usuario) y el mensaje usa formato HTML", () => {
+    const { "telegram-db.js": js } = connectTelegramDb({ "index.html": "<body></body>" }, { token: TOKEN, chatId: "1" }, "Mi proyecto");
+    expect(js).not.toContain('type === "password"');
+    expect(js).toContain('parse_mode: "HTML"');
+  });
 });
