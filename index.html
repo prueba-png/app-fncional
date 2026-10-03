@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- interactive-widget: al abrir el teclado en el móvil se redimensiona la app en vez de desplazar la página -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#12151c" />
+    <!-- Permite añadir la app a la pantalla de inicio (se abre a pantalla completa y conserva sus datos) -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Ganx" />
+    <meta name="application-name" content="Ganx" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <title>Ganx</title>
+    <link rel="icon" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="icon" sizes="512x512" href="icons/icon-512.png" />
+    <!-- Manifiesto: permite "Añadir a la pantalla de inicio" en Android (y en iOS 16.4+) como una app -->
+    <link rel="manifest" href="manifest.json" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
