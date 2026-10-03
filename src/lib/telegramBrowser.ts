@@ -63,7 +63,7 @@ export async function browserTelegramBackup(c: TelegramCredentials, filename: st
     fileId: msg.document.file_id,
     fileUniqueId: msg.document.file_unique_id,
     fileSize: msg.document.file_size ?? blob.size,
-    chatTitle: msg.chat.title ?? msg.chat.username,
+    chatTitle: msg.chat?.title ?? msg.chat?.username,
     date: msg.date,
   };
 }
