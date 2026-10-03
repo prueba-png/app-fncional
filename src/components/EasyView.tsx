@@ -22,6 +22,10 @@ import { MicButton } from "./MicButton";
 import { useWakeLock } from "../lib/wakeLock";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
+/** Detecta si el usuario mencionó una URL de referencia dentro de una instrucción de cambio más larga
+ * (p. ej. «pon los mismos colores que https://stripe.com»), para que la IA pueda leerla de verdad en vez
+ * de ignorarla: sin esto, «Aplicar cambio» nunca activaba la herramienta de leer la web. */
+const TEXT_URL_RE = /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?/i;
 
 export function EasyView() {
   const stage = useEasy((s) => s.stage);
@@ -740,6 +744,7 @@ function ResultScreen() {
           attachments,
           attachmentLabels: labels,
           mode: "generate-from-reference",
+          webFetch: TEXT_URL_RE.test(text),
         });
       } catch (err) {
         toast((err as Error).message, "error");
@@ -749,7 +754,7 @@ function ResultScreen() {
       return;
     }
     setChange("");
-    void useChat.getState().send(text);
+    void useChat.getState().send(text, TEXT_URL_RE.test(text) ? { webFetch: true } : undefined);
   };
 
   /**
@@ -760,14 +765,15 @@ function ResultScreen() {
   const resendLastUser = async (mode: "continue" | "retry") => {
     if (!lastUserPrompt) return;
     const text = mode === "continue" ? resumePrompt(lastUserPrompt) : lastUserPrompt;
+    const webFetch = TEXT_URL_RE.test(text);
     if (!lastHadAttachments) {
-      void useChat.getState().send(text);
+      void useChat.getState().send(text, webFetch ? { webFetch: true } : undefined);
       return;
     }
     try {
       const refs = await db.listReferences(project.id);
       const attachments = memoryAttachments(refs);
-      await useChat.getState().send(text, { attachments, mode: "generate-from-reference" });
+      await useChat.getState().send(text, { attachments, mode: "generate-from-reference", webFetch });
     } catch (err) {
       toast((err as Error).message, "error");
     }
