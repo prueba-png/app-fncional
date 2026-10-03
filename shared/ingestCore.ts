@@ -294,21 +294,39 @@ const COOKIE_BANNER_SELECTORS = [
   "#onetrust-banner-sdk", "#onetrust-consent-sdk", ".onetrust-pc-dark-filter",
   "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay",
   "#qc-cmp2-container", "#didomi-host", ".didomi-popup-backdrop", ".didomi-consent-popup-backdrop",
-  "#usercentrics-root", "#cookie-law-info-bar", "#cookie-law-info-again",
+  "#usercentrics-root", "uc-banner", "uc-app-container", "#cookie-law-info-bar", "#cookie-law-info-again",
+  "#cky-consent-container", "#cky-overlay", ".cky-consent-bar",
   "#cmplz-cookiebanner-container", ".cmplz-cookiebanner",
   "#iubenda-cs-banner", ".iubenda-cs-container",
   "#truste-consent-track", "#trustarc-banner-overlay",
   "#borlabs-cookie-box", "#sp_message_container",
+  ".cc-window", ".cc-banner", "#cookieconsent",
+  "#termly-consent-banner", "#teconsent",
+  ".osano-cm-window", ".osano-cm-dialog",
+  "#klaro", ".klaro .cookie-notice",
+  "#tarteaucitronRoot", "#tarteaucitronAlertBig",
+  "#ch2", ".ch2-dialog",
+  "#ccc", ".ccc-notify", "#ccc-module",
+  "#axeptio_overlay", ".axeptio_widget",
+  "#fc-consent-root", ".fc-dialog-container",
   "[class*=cookie-consent-banner]", "[id*=cookie-consent]", "[class*=cookiebanner]",
 ];
+// Scripts de plataformas de gestión de consentimiento (CMP): aunque el aviso visible no se reconozca y
+// no se quite, quitar también su script evita que intente hacer cosas (avisar a su propio servidor,
+// recargar la página, aplicar sus propias clases) que en una copia independiente fallan a medias y dejan
+// la página a medio aplicar sus estilos — el "formulario destructurado" que puede verse al pulsar su botón.
+const COOKIE_SCRIPT_RE =
+  /cdn\.cookielaw\.org|onetrust|cookiebot|cookie-script\.com|quantcast\.mgr\.consensu\.org|didomi\.io|usercentrics\.eu|cookie-law-info|cmplz|iubenda\.com\/cs|trustarc\.com|borlabs-cookie|cookieyes\.com|cky-|termly\.io|osano\.com|klaro-?js|tarteaucitron\.js|cookiehub\.net|civicuk\.com|cookiecontrol|axeptio\.net|fundingchoicesmessages\.google\.com|consent\.cookiebot|sourcepoint\.(mgr\.consensu\.org|com)/i;
 const COOKIE_WORD_RE = /\bcookies?\b/i;
 const CONSENT_BUTTON_RE = /\b(aceptar|rechazar|acepto|permitir|configurar|preferencias|manage|accept all|reject all|i agree|allow all|settings)\b/i;
 
 /**
- * Quita el aviso de cookies que tapa el resto de la página: como se descarga el HTML sin ejecutar nada
- * (una visita anónima de verdad vería lo mismo), el clon se queda con el aviso encima tal cual lo vería
- * un visitante que nunca ha aceptado nada. No hay forma de "pulsar Aceptar" en una descarga sin navegador,
- * así que se quita el aviso del propio HTML para que se vea el contenido real de la página de una vez.
+ * Quita el aviso de cookies que tapa el resto de la página y, si usa una plataforma de consentimiento
+ * conocida, también su script: como se descarga el HTML sin ejecutar nada (una visita anónima de verdad
+ * vería lo mismo), el clon se queda con el aviso encima tal cual lo vería un visitante que nunca ha
+ * aceptado nada, y como son scripts pensados para la web original, no para una copia independiente, su
+ * botón de aceptar/rechazar puede dejar la página a medias si se intenta usar. No hay forma de "pulsar
+ * Aceptar" en una descarga sin navegador, así que se quita el aviso entero del propio HTML.
  */
 function removeCookieBanners($: cheerio.CheerioAPI, warnings: string[]): void {
   let removed = 0;
@@ -319,19 +337,40 @@ function removeCookieBanners($: cheerio.CheerioAPI, warnings: string[]): void {
       removed++;
     }
   }
-  // Heurística genérica (avisos hechos a medida, sin usar un proveedor conocido): un diálogo/overlay con
-  // la palabra "cookie(s)" y al menos un botón típico de aceptar/rechazar/configurar.
-  $('[role="dialog"], [aria-modal="true"], [class*=modal], [class*=overlay], [class*=popup], [class*=banner], [id*=modal], [id*=overlay], [id*=popup], [id*=banner]').each((_, el) => {
+  $("script[src]").each((_, el) => {
+    if (COOKIE_SCRIPT_RE.test($(el).attr("src") ?? "")) {
+      $(el).remove();
+      removed++;
+    }
+  });
+  // Heurística genérica (avisos hechos a medida, sin usar un proveedor conocido): un elemento con la
+  // palabra "cookie(s)" y al menos un botón típico de aceptar/rechazar/configurar. Se busca tanto en
+  // contenedores con pinta de aviso/modal como, más en general, entre los primeros hijos de <body> (así
+  // se cubren avisos propios sin esas clases, que son la mayoría de los hechos a medida).
+  const candidates = new Set<Element>();
+  $('[role="dialog"], [aria-modal="true"], [class*=modal], [class*=overlay], [class*=popup], [class*=banner], [id*=modal], [id*=overlay], [id*=popup], [id*=banner], [class*=consent], [id*=consent]').each(
+    (_, el) => {
+      candidates.add(el);
+    },
+  );
+  $("body")
+    .children()
+    .slice(0, 6)
+    .each((_, el) => {
+      candidates.add(el);
+    });
+  for (const el of candidates) {
     const $el = $(el);
-    if (!$el.parent().length) return; // ya se quitó como descendiente de otro quitado antes
+    if (!$el.parent().length) continue; // ya se quitó como descendiente de otro quitado antes
+    if ($el.find("article, main, h1").length) continue; // parece contenido real de la página, no un aviso
     const text = $el.text();
-    if (!COOKIE_WORD_RE.test(text)) return;
+    if (!COOKIE_WORD_RE.test(text) || text.length > 1500) continue; // un aviso de cookies es corto
     const hasButton = $el.find("button, a, input[type=button]").toArray().some((b) => CONSENT_BUTTON_RE.test($(b).text()));
     if (hasButton) {
       $el.remove();
       removed++;
     }
-  });
+  }
   if (removed) {
     // Los avisos de cookies suelen bloquear el scroll del fondo mientras están abiertos; se revierte.
     for (const sel of ["html", "body"]) {

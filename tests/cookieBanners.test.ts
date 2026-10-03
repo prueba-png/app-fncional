@@ -30,6 +30,34 @@ describe("quitar avisos de cookies", () => {
     expect(result.files["index.html"]).toContain("Bienvenido a mi banco");
   });
 
+  it("quita un aviso casero sin clases ni roles reconocibles, por estar entre los primeros hijos de body", async () => {
+    const html = `<html><body>
+      <div>
+        <span>Usamos cookies para mejorar tu experiencia.</span>
+        <button>Aceptar</button>
+        <button>Rechazar</button>
+      </div>
+      <header><h1>Tienda Online</h1></header>
+      <main><article><h1>Nuestros productos</h1><p>Catálogo completo.</p></article></main>
+    </body></html>`;
+    const fetcher: TextFetcher = async () => ({ finalUrl: "https://tienda.test/", status: 200, contentType: "text/html", text: html });
+    const result = await ingestWithFetcher(fetcher, { url: "https://tienda.test/" });
+    expect(result.files["index.html"]).not.toContain("mejorar tu experiencia");
+    expect(result.files["index.html"]).toContain("Nuestros productos");
+  });
+
+  it("quita el script de una plataforma de consentimiento conocida aunque el aviso visible no se reconozca", async () => {
+    const html = `<html><head>
+      <script src="https://cdn.cookielaw.org/consent/abc123/otSDKStub.js"></script>
+    </head><body><h1>Página normal</h1></body></html>`;
+    const fetcher: TextFetcher = async () => ({ finalUrl: "https://web.test/", status: 200, contentType: "text/html", text: html });
+    // keepScripts: true para comprobar que el script se quita por sí mismo, no porque la versión sin
+    // scripts los elimine todos de todas formas
+    const result = await ingestWithFetcher(fetcher, { url: "https://web.test/", keepScripts: true });
+    expect(result.files["index.html"]).not.toContain("cookielaw.org");
+    expect(result.files["index.html"]).toContain("Página normal");
+  });
+
   it("no toca contenido real que solo menciona la palabra cookie sin ser un aviso de consentimiento", async () => {
     const html = `<html><body>
       <article><h1>Receta de galletas (cookies)</h1><p>Hoy hacemos cookies de chocolate.</p></article>
