@@ -1,0 +1,18 @@
+{
+  "name": "DevStudio Pro",
+  "short_name": "DevStudio",
+  "description": "Clona webs, capturas y vídeos, o crea páginas nuevas con IA, y guárdalas en tu dispositivo.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12151c",
+  "theme_color": "#12151c",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
