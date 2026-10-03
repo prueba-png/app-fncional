@@ -63,6 +63,39 @@ function bridgeScript(pages: string[]): string {
 })();</script>`;
 }
 
+/**
+ * El iframe de la vista previa usa `sandbox="allow-scripts"` SIN `allow-same-origin` (para que el
+ * código de la web clonada no pueda tocar el almacenamiento del editor, donde viven las claves de la
+ * IA). Pero eso hace que el propio navegador lance un error al leer `localStorage`/`sessionStorage`
+ * ("Storage is disabled inside 'sandboxed' iframes"), y muchas webs reales llaman a eso nada más
+ * arrancar (ajustes, analítica, flags...): si no se captura, el script entero se detiene ahí y en
+ * pantalla solo queda lo que hubiera estático (a veces, literalmente el aviso de "activa JavaScript").
+ * Este script se inyecta el primero de todos y sustituye el almacenamiento por uno en memoria (que se
+ * pierde al recargar, pero no rompe nada) solo cuando el real no es accesible; si funciona, no toca nada.
+ */
+function storagePolyfillScript(): string {
+  return `<script>(function(){
+  function fake(){
+    var mem = {};
+    var obj = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+      setItem: function(k, v){ mem[String(k)] = String(v); },
+      removeItem: function(k){ delete mem[String(k)]; },
+      clear: function(){ mem = {}; },
+      key: function(i){ return Object.keys(mem)[i] || null; },
+    };
+    Object.defineProperty(obj, "length", { get: function(){ return Object.keys(mem).length; } });
+    return obj;
+  }
+  function patch(name){
+    try { var s = window[name]; s.setItem("__t","1"); s.removeItem("__t"); return; } catch(e) {}
+    try { Object.defineProperty(window, name, { value: fake(), configurable: true }); } catch(e) {}
+  }
+  patch("localStorage");
+  patch("sessionStorage");
+})();</script>`;
+}
+
 export interface BuildOptions {
   page?: string;
   autoInjectDeps?: boolean;
@@ -129,6 +162,13 @@ export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): s
       if (!local || /\.html?$/i.test(local)) return m;
       return `${attr}=${q}${toDataUrl(local, files[local])}${q}`;
     });
+  }
+
+  {
+    const storageScript = storagePolyfillScript();
+    if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${storageScript}`);
+    else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => `${m}<head>${storageScript}</head>`);
+    else html = storageScript + html;
   }
 
   if (autoInjectDeps) {

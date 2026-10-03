@@ -115,6 +115,8 @@ export interface RenderProbe {
   visible: number;
   /** Alto de la página */
   height: number;
+  /** Primeros caracteres del texto visible (para detectar avisos de «activa JavaScript») */
+  sample: string;
 }
 
 /**
@@ -133,8 +135,8 @@ export async function probeRender(files: FileMap, opts: { baseUrl?: string; wait
     var all = document.body ? document.body.getElementsByTagName("*") : [];
     var visible = 0;
     for (var i = 0; i < all.length && i < 5000; i++) { var r = all[i].getBoundingClientRect(); if (r.width > 2 && r.height > 2) visible++; }
-    var text = document.body ? (document.body.innerText || "").replace(/\\s+/g, " ").trim().length : 0;
-    parent.postMessage({ ${FLAG}: ${JSON.stringify(id)}, text: text, visible: visible, height: document.documentElement.scrollHeight }, "*");
+    var full = document.body ? (document.body.innerText || "").replace(/\\s+/g, " ").trim() : "";
+    parent.postMessage({ ${FLAG}: ${JSON.stringify(id)}, text: full.length, visible: visible, height: document.documentElement.scrollHeight, sample: full.slice(0, 300) }, "*");
   }
   window.addEventListener("load", function () { setTimeout(report, ${waitMs}); });
   setTimeout(report, ${waitMs + 6000});
@@ -143,7 +145,12 @@ export async function probeRender(files: FileMap, opts: { baseUrl?: string; wait
   // Clones de webs: sin añadir librerías, se mide la página tal cual es
   const html = withScript(buildPreviewDocument(files, { bridge: false, baseUrl: opts.baseUrl, autoInjectDeps: false }), script);
   try {
-    return await renderInFrame(html, id, { width, height: 800 }, timeoutMs, (d) => ({ text: Number(d.text) || 0, visible: Number(d.visible) || 0, height: Number(d.height) || 0 }));
+    return await renderInFrame(html, id, { width, height: 800 }, timeoutMs, (d) => ({
+      text: Number(d.text) || 0,
+      visible: Number(d.visible) || 0,
+      height: Number(d.height) || 0,
+      sample: typeof d.sample === "string" ? d.sample : "",
+    }));
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as cheerio from "cheerio";
-import { normalizeUrl } from "../src/store/easy";
+import { normalizeUrl, NOSCRIPT_RE } from "../src/store/easy";
 import { detectClientRendered } from "../server/lib/domAnalyzer";
 
 describe("normalizeUrl", () => {
@@ -10,6 +10,21 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("hola mundo")).toBeNull();
     expect(normalizeUrl("palabra")).toBeNull();
     expect(normalizeUrl("")).toBeNull();
+  });
+});
+
+describe("NOSCRIPT_RE (aviso de 'activa JavaScript')", () => {
+  it("reconoce el aviso en varios idiomas y formas", () => {
+    expect(NOSCRIPT_RE.test("Please enable JavaScript to run this app.")).toBe(true);
+    expect(NOSCRIPT_RE.test("JavaScript is disabled in your browser.")).toBe(true);
+    expect(NOSCRIPT_RE.test("Para poder acceder a la aplicación es necesario que actives JavaScript.")).toBe(true);
+    expect(NOSCRIPT_RE.test("Esta página necesita JavaScript para funcionar.")).toBe(true);
+    expect(NOSCRIPT_RE.test("JavaScript desactivado: activa JavaScript y recarga la página.")).toBe(true);
+  });
+
+  it("no se activa con contenido real que no menciona JavaScript", () => {
+    expect(NOSCRIPT_RE.test("Bienvenido a nuestra tienda online. Envíos gratis a partir de 30€.")).toBe(false);
+    expect(NOSCRIPT_RE.test("Aprende JavaScript con nuestro curso online, totalmente gratis.")).toBe(false);
   });
 });
 

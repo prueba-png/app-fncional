@@ -50,6 +50,43 @@ describe("recursos locales guardados como imagen y dirección base", () => {
   });
 });
 
+describe("almacenamiento en el iframe sin allow-same-origin", () => {
+  it("sustituye localStorage por uno en memoria cuando el real lanza un error (sandbox sin allow-same-origin)", () => {
+    const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { bridge: false, autoInjectDeps: false });
+    const script = html.match(/<script>([\s\S]*?patch\("sessionStorage"\);[\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+
+    // Simula exactamente el fallo real de Chrome en un iframe sandbox sin "allow-same-origin"
+    const fakeWindow: Record<string, unknown> = {};
+    Object.defineProperty(fakeWindow, "localStorage", {
+      get() {
+        throw new Error("Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.");
+      },
+      configurable: true,
+    });
+    fakeWindow.sessionStorage = { setItem: () => {}, removeItem: () => {} }; // esta sí funciona
+
+    new Function("window", script!)(fakeWindow);
+
+    const ls = fakeWindow.localStorage as Storage;
+    expect(() => ls.setItem("k", "v")).not.toThrow();
+    expect(ls.getItem("k")).toBe("v");
+    ls.removeItem("k");
+    expect(ls.getItem("k")).toBeNull();
+    // La que sí funcionaba no se ha tocado
+    expect(typeof (fakeWindow.sessionStorage as { setItem: unknown }).setItem).toBe("function");
+  });
+
+  it("no toca el almacenamiento si ya funciona", () => {
+    const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { bridge: false, autoInjectDeps: false });
+    const script = html.match(/<script>([\s\S]*?patch\("sessionStorage"\);[\s\S]*?)<\/script>/)?.[1];
+    const real = { setItem: () => {}, removeItem: () => {}, getItem: () => "real" };
+    const fakeWindow = { localStorage: real, sessionStorage: real };
+    new Function("window", script!)(fakeWindow);
+    expect(fakeWindow.localStorage).toBe(real);
+  });
+});
+
 describe("scripts inyectados en la vista previa", () => {
   it("son JavaScript válido", () => {
     const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { baseUrl: "https://a.test/" });

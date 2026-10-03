@@ -89,6 +89,8 @@ function readPrecision(): Precision {
     return "exact";
   }
 }
+/** Texto típico del aviso que muestran las webs cuando JavaScript no se ejecuta (en varios idiomas). */
+export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|please\s+enable)\s+javascript\b|\bjavascript\s+(is\s+)?(disabled|desactivad[oa]|requer[ei]d?o|necesari[oa])\b|\bneed(s|a)?\s+javascript\b/i;
 const VISUAL_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|ogv|pdf)$/i;
 const CODE_RE = /\.(html?|css|m?js|json|txt|md|xml|svg)$/i;
 const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
@@ -506,7 +508,12 @@ export const useEasy = create<EasyState>((set, get) => {
             probeRender(result.staticFiles, { baseUrl: result.finalUrl }),
           ]);
           if (signal.aborted) return;
-          const scriptsWork = !!withJs && withJs.text >= 20 && (!without || (withJs.text >= without.text * 0.6 && withJs.visible >= without.visible * 0.5));
+          // Si la versión sin scripts es solo un aviso de "activa JavaScript" (lo único que vería alguien
+          // con JS desactivado), no sirve de nada compararla por cantidad de texto: ese aviso puede ser
+          // más largo que el contenido real ya desbloqueado, y la comparación por tamaño elegiría por error
+          // el aviso en vez de la página real.
+          const staticIsNoScriptNotice = !!without && NOSCRIPT_RE.test(without.sample);
+          const scriptsWork = !!withJs && withJs.text >= 20 && (staticIsNoScriptNotice || !without || (withJs.text >= without.text * 0.6 && withJs.visible >= without.visible * 0.5));
           if (!scriptsWork) {
             files = result.staticFiles;
             note = "Los scripts de esta web no funcionan fuera de ella, así que el clon muestra la página tal como se ve, pero sin sus animaciones ni menús desplegables.";
