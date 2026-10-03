@@ -471,6 +471,49 @@ async function geminiOnce(
   });
 }
 
+/**
+ * Convierte un audio grabado en el navegador a texto con Gemini. Se usa como alternativa al dictado
+ * nativo del navegador (`SpeechRecognition`), que Safari (iPhone/iPad) no trae incorporado: ahí se
+ * graba el audio con MediaRecorder y se transcribe aquí en vez de usar el reconocimiento de voz del propio navegador.
+ */
+export async function transcribeAudio(
+  apiKey: string,
+  base64: string,
+  mimeType: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const key = sanitizeKey(apiKey);
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType, data: base64 } },
+              { text: "Transcribe literalmente lo que se dice en este audio, en español. Responde solo con el texto transcrito, sin comentarios ni comillas. Si no hay ninguna voz, responde con una cadena vacía." },
+            ],
+          },
+        ],
+        generationConfig: { maxOutputTokens: 2048, temperature: 0 },
+      }),
+      signal,
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    if (res.status === 400 && /API key not valid/i.test(body)) throw new Error("La clave de Google no es válida.");
+    if (res.status === 429) throw new Error("Se ha superado el límite gratuito de Google por ahora.");
+    throw new Error(`Google respondió con un error (${res.status}).`);
+  }
+  const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  return text.trim();
+}
+
 export async function streamGemini(
   req: ChatRequest,
   emit: Emit,

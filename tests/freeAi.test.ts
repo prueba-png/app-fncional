@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamGemini, streamOpenRouter } from "../src/lib/freeAi";
+import { streamGemini, streamOpenRouter, transcribeAudio } from "../src/lib/freeAi";
 import { detectProvider } from "../src/db/db";
 import type { ChatStreamEvent } from "../shared/types";
 
@@ -255,5 +255,22 @@ describe("fallos de red (Load failed)", () => {
       throw e;
     });
     await expect(streamGemini(makeReq("k-real-stop"), () => {}, controller.signal)).rejects.toMatchObject({ name: "AbortError", message: "Generación detenida por el usuario." });
+  });
+});
+
+describe("transcribeAudio (dictado por voz en Safari, sin SpeechRecognition)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("transcribe el audio grabado", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      expect(url).toContain(":generateContent");
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Cambia el color del botón a verde" }] } }] }));
+    });
+    const text = await transcribeAudio("AIzaSyA1234567890abcdefghijklmnopqrstuv", "AAAA", "audio/webm");
+    expect(text).toBe("Cambia el color del botón a verde");
+  });
+
+  it("da un mensaje claro si la clave no es válida", async () => {
+    vi.stubGlobal("fetch", async () => new Response("API key not valid", { status: 400 }));
+    await expect(transcribeAudio("clave-mala", "AAAA", "audio/webm")).rejects.toThrow(/clave de Google no es válida/);
   });
 });

@@ -148,6 +148,10 @@ function plausible(accept: string, target: string, text: string): boolean {
     // Páginas de bloqueo o de límite de peticiones (Cloudflare, captchas, el propio servicio)
     if (/<title>\s*(just a moment|attention required|access denied|403 forbidden|too many requests|rate limit)/i.test(head) || /cf-browser-verification|challenge-platform|g-recaptcha|hcaptcha/i.test(head)) return false;
     if (text.length < 1500 && /(rate.?limit|too many requests|access denied|forbidden|not allowed|blocked|quota)/i.test(text)) return false;
+    // Página de error/bloqueo de Cloudflare (plantilla con "Reference ID"/"Ray ID", en inglés o español),
+    // que algunos servicios de reenvío devuelven con HTTP 200 y que si no se detecta se clona tal cual
+    // en vez del sitio real.
+    if (/\b(reference id|ray id)\s*:/i.test(head) && /\b(algo sali[oó] mal|something went wrong|sorry,? you (have been|are) blocked|unable to access)\b/i.test(head)) return false;
     return /<(!doctype|html|head|body|div|main|section|title)\b/i.test(head) || /\.xml(\?|$)/i.test(target);
   }
   if (/text\/css/.test(accept)) return !/^\s*(<!doctype|<html|\{"error")/i.test(text);

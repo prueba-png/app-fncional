@@ -98,6 +98,21 @@ describe("respuestas de error de los servicios", () => {
   });
 });
 
+describe("páginas de bloqueo de Cloudflare", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("no clona la página de bloqueo de Cloudflare como si fuera el sitio real", async () => {
+    const BLOCK_PAGE = `<!doctype html><html><head><title>Error</title></head><body>
+      <h1>Algo salió mal</h1>
+      <p>Reference ID: 0.12f93d17.1791056064.3645e092</p>
+      <p>IP: 45.61.185.154</p>
+      <p>Fecha/Hora: 03.10.2026 21:34</p>
+      <p>Por favor, inténtalo más tarde.</p>
+    </body></html>`;
+    vi.stubGlobal("fetch", async (input: string) => new Response(BLOCK_PAGE, { status: 200, headers: { "content-type": "text/html" } }));
+    await expect(ingestViaRelay({ url: "https://bloqueada.example/" })).rejects.toThrow();
+  });
+});
+
 describe("proxy propio del usuario", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
   it("usa el servidor propio antes que los públicos cuando está configurado", async () => {

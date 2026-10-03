@@ -5,6 +5,7 @@ import { telegramTest } from "../lib/api";
 import { sanitizeKey } from "../lib/util";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
+import { mediaRecorderSupported, speechSupported } from "./MicButton";
 
 const MODELS = [
   { id: "claude-opus-5-5", label: "Claude Opus 5.5 (recomendado)" },
@@ -261,6 +262,37 @@ export function SettingsDialog() {
             </label>
           </div>
         </>
+      )}
+      {draft.aiProvider !== "gemini" && !speechSupported && mediaRecorderSupported && (
+        <label className="field">
+          <span>Clave gratuita de Google (para el dictado por voz)</span>
+          <div className="row">
+            <input
+              className="input mono"
+              type={showKey ? "text" : "password"}
+              autoComplete="off"
+              placeholder="AIza… o AQ…"
+              value={draft.geminiApiKey}
+              onChange={(e) => set("geminiApiKey", e.target.value)}
+            />
+            <button
+              className="btn icon"
+              type="button"
+              onClick={() => setShowKey((s) => !s)}
+              aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+            >
+              <Icon name="eye" />
+            </button>
+          </div>
+          <small>
+            Este navegador (Safari) no trae dictado por voz propio, así que el botón del micrófono graba tu voz y la transcribe con Google
+            Gemini. Gratis y sin tarjeta: entra en{" "}
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer noopener">
+              aistudio.google.com/apikey
+            </a>{" "}
+            con tu cuenta de Google y pulsa «Create API key».
+          </small>
+        </label>
       )}
 
       <div className="section-title">Clonar por enlace (tu servidor de descarga)</div>
