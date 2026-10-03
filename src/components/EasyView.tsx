@@ -803,6 +803,20 @@ function ResultScreen() {
     }
   };
 
+  const forkFromHere = async () => {
+    await useStudio.getState().flush();
+    const base = useStudio.getState().project;
+    if (!base) return;
+    await useStudio.getState().createProject({
+      name: `${base.name} (nuevo)`,
+      files: { ...base.files },
+      origin: base.origin,
+      ingest: base.ingest,
+      message: `Nuevo proyecto a partir de "${base.name}"`,
+    });
+    toast(`Creado un proyecto nuevo a partir de "${base.name}" (ese no se ha tocado). Tiene su propio chat: ya puedes seguir añadiéndole cosas aquí.`, "success");
+  };
+
   const saveTelegram = async () => {
     if (!telegramReady()) {
       toast("Primero conecta tu bot de Telegram en Ajustes.", "info");
@@ -825,6 +839,14 @@ function ResultScreen() {
       <div className="result-bar">
         <button className="btn" onClick={goHome} aria-label="Nuevo clon" title="Volver al inicio para clonar otra cosa">
           <Icon name="plus" /> <span className="label">Nuevo clon</span>
+        </button>
+        <button
+          className="btn"
+          onClick={() => void forkFromHere()}
+          aria-label="Proyecto nuevo desde aquí"
+          title="Crea un proyecto nuevo con una copia de este (que queda intacto), con su propio chat, para seguir añadiéndole cosas sin riesgo"
+        >
+          <Icon name="copy" /> <span className="label">Proyecto nuevo desde aquí</span>
         </button>
         <div className="result-title">
           <b>{project.name}</b>
