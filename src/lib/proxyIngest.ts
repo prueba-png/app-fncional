@@ -271,6 +271,48 @@ export async function fetchSiteScreenshot(url: string, timeoutMs = 30_000): Prom
   return null;
 }
 
+/** Compara dos páginas por su título y primer encabezado (ya normalizados) para saber si son "la misma". */
+function samePageFingerprint(a: IngestResult, b: IngestResult): boolean {
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  return !!norm(a.title) && norm(a.title) === norm(b.title) && norm(a.outline[0]?.text ?? "") === norm(b.outline[0]?.text ?? "");
+}
+
+/**
+ * Pide una URL concreta de una web (no la portada) sin JavaScript y comprueba que de verdad es esa
+ * página, no una copia de la portada. Muchas aplicaciones de una sola página (rutas gestionadas por
+ * JavaScript del navegador, como el login de un panel o una app con React/Vue Router) hacen que el
+ * servidor devuelva EXACTAMENTE el mismo HTML base para cualquier dirección, y solo el JavaScript del
+ * navegador decide qué mostrar según la URL; sin ejecutar ese JavaScript, pedir la URL del login descarga
+ * el mismo HTML genérico que la portada. Si se detecta este caso, se usa una versión ya pintada por un
+ * navegador real (que sí ejecuta el JavaScript y navega de verdad a esa dirección) en su lugar.
+ */
+async function resolveIfGenericShell(opts: IngestOptions, first: IngestResult, budgetMs: number): Promise<IngestResult | null> {
+  let home: URL;
+  try {
+    home = new URL(opts.url);
+  } catch {
+    return null;
+  }
+  if (home.pathname.replace(/\/+$/, "").length === 0) return null; // ya es la portada
+  try {
+    const homeResult = await ingestWithFetcher(relayFetcher, { ...opts, url: `${home.origin}/`, budgetMs: Math.min(budgetMs, 15_000) }, undefined);
+    if (!samePageFingerprint(first, homeResult)) return null;
+    const rendered = await fetchRendered(opts.url);
+    const fetcher: TextFetcher = (u, o) => (u === opts.url ? Promise.resolve(rendered) : relayFetcher(u, o));
+    const result = await ingestWithFetcher(fetcher, { ...opts, keepScripts: false, budgetMs }, relayBinary);
+    return {
+      ...result,
+      looksClientRendered: false,
+      warnings: [
+        ...result.warnings,
+        "Esta dirección parece mostrarse solo con JavaScript del navegador (el servidor devolvía la misma página que la portada): se usó una versión ya pintada por un navegador real para traer el contenido específico de esta dirección.",
+      ],
+    };
+  } catch {
+    return null; // si la comprobación o el navegador real fallan, se deja el resultado original
+  }
+}
+
 /** Clona una web con su código real (HTML, CSS y fuentes originales) desde el navegador. */
 export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult> {
   const budgetMs = opts.budgetMs ?? 50_000;
@@ -278,7 +320,10 @@ export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult>
   let firstError: unknown;
   try {
     first = await ingestWithFetcher(relayFetcher, { ...opts, budgetMs }, relayBinary);
-    if (!first.looksClientRendered) return first;
+    if (!first.looksClientRendered) {
+      const resolved = await resolveIfGenericShell(opts, first, budgetMs);
+      return resolved ?? first;
+    }
   } catch (err) {
     firstError = err;
   }
