@@ -73,6 +73,143 @@ export async function inlineFonts(css: string, fetchBinary: BinaryFetcher, warni
   return out;
 }
 
+const MAX_IMAGES = 30;
+const IMAGE_CONCURRENCY = 5;
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const MAX_IMAGES_TOTAL = 15 * 1024 * 1024;
+const IMG_MIME_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/svg+xml": "svg",
+  "image/avif": "avif",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+};
+
+function extFromUrl(url: string): string | null {
+  return url.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? null;
+}
+
+function slugFromUrl(url: string): string {
+  try {
+    const base = new URL(url).pathname.split("/").filter(Boolean).pop() || "img";
+    return base.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-z0-9-_]+/gi, "-").slice(0, 40) || "img";
+  } catch {
+    return "img";
+  }
+}
+
+/** Ejecuta `fn` sobre `items` con un máximo de `limit` a la vez (no satura los servicios de reenvío). */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/**
+ * Descarga las imágenes reales de la página (fotos, logotipos, iconos) y las guarda como ficheros propios
+ * del proyecto en vez de dejarlas enlazadas a la web original: así el clon no depende de que esa web siga
+ * en línea, ni de que permita cargar sus imágenes desde otro dominio (muchas lo bloquean por referer/CORS,
+ * lo que antes dejaba huecos de imagen rota en el clon aunque todo lo demás se hubiera copiado bien).
+ */
+async function inlineImages(
+  $: cheerio.CheerioAPI,
+  stylesCss: string,
+  assets: Map<string, AssetRef>,
+  fetchBinary: BinaryFetcher,
+  warnings: string[],
+  deadline: number,
+): Promise<{ css: string; files: FileMap }> {
+  const candidates = [...assets.values()].filter((a) => (a.kind === "image" || a.kind === "icon") && !/^data:/i.test(a.url)).slice(0, MAX_IMAGES);
+  const results = await mapWithConcurrency(candidates, IMAGE_CONCURRENCY, async ({ url }) => {
+    const remaining = deadline - Date.now();
+    if (remaining < 600) return null;
+    try {
+      const res = await fetchBinary(url, { timeoutMs: Math.min(10_000, remaining), maxBytes: MAX_IMAGE_BYTES });
+      return { url, ...res };
+    } catch {
+      return null;
+    }
+  });
+
+  const files: FileMap = {};
+  const localFor = new Map<string, string>();
+  const used = new Set<string>();
+  let total = 0;
+  let skipped = 0;
+  for (const r of results) {
+    if (!r) {
+      skipped++;
+      continue;
+    }
+    const bytes = Math.floor((r.base64.length * 3) / 4);
+    if (total + bytes > MAX_IMAGES_TOTAL) {
+      skipped++;
+      continue;
+    }
+    total += bytes;
+    const contentType = r.contentType.split(";")[0].trim().toLowerCase();
+    const ext = IMG_MIME_EXT[contentType] ?? extFromUrl(r.url) ?? "jpg";
+    const slug = slugFromUrl(r.url);
+    let path = `assets/${slug}.${ext}`;
+    for (let i = 2; used.has(path); i++) path = `assets/${slug}-${i}.${ext}`;
+    used.add(path);
+    files[path] = `data:${contentType || `image/${ext}`};base64,${r.base64}`;
+    localFor.set(r.url, path);
+  }
+  if (skipped) warnings.push(`${skipped} imagen(es) no se pudieron descargar; se mantienen enlazadas a la web original.`);
+
+  let css = stylesCss;
+  for (const [url, path] of localFor) css = css.split(url).join(path);
+
+  $("[style]").each((_, el) => {
+    const $el = $(el);
+    const style = $el.attr("style");
+    if (!style || !/url\(/i.test(style)) return;
+    let next = style;
+    for (const [url, path] of localFor) next = next.split(url).join(path);
+    if (next !== style) $el.attr("style", next);
+  });
+  $("img[src], video[poster]").each((_, el) => {
+    const $el = $(el);
+    for (const attr of ["src", "poster"]) {
+      const v = $el.attr(attr);
+      if (v && localFor.has(v)) $el.attr(attr, localFor.get(v)!);
+    }
+  });
+  $("[srcset]").each((_, el) => {
+    const $el = $(el);
+    const value = $el.attr("srcset");
+    if (!value) return;
+    $el.attr(
+      "srcset",
+      value
+        .split(",")
+        .map((part) => {
+          const [u, ...desc] = part.trim().split(/\s+/);
+          return [localFor.get(u) ?? u, ...desc].join(" ");
+        })
+        .join(", "),
+    );
+  });
+  $('link[rel*="icon"][href], use[href], image[href]').each((_, el) => {
+    const $el = $(el);
+    const v = $el.attr("href");
+    if (v && localFor.has(v)) $el.attr("href", localFor.get(v)!);
+  });
+
+  return { css, files };
+}
+
 const MAX_STYLESHEETS = 15;
 const MAX_IMPORT_DEPTH = 2;
 const MAX_CSS_BYTES = 2 * 1024 * 1024;
@@ -246,7 +383,9 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
   });
   $("[style]").each((_, el) => {
     const $el = $(el);
-    $el.attr("style", rewriteCssUrls($el.attr("style")!, base));
+    const rewritten = rewriteCssUrls($el.attr("style")!, base);
+    $el.attr("style", rewritten);
+    for (const m of rewritten.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) addAsset(m[1], "style attr");
   });
 
   // --- hojas de estilo: extracción a styles.css ---
@@ -292,6 +431,17 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
   if (fetchBinary && inlineStylesheets) stylesCss = await inlineFonts(stylesCss, fetchBinary, warnings, deadline - 500);
   for (const m of stylesCss.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) addAsset(m[1], "css url()");
 
+  // Imágenes reales (fotos, logotipos, iconos): se descargan y se guardan como ficheros del proyecto en
+  // vez de dejarlas enlazadas a la web original (que puede bloquear la carga desde otro dominio o dejar
+  // de estar disponible), para que el clon sea una copia de verdad, no una aproximación que depende de
+  // que la web original siga sirviendo esas imágenes.
+  let imageFiles: FileMap = {};
+  if (fetchBinary) {
+    const inlined = await inlineImages($, stylesCss, assets, fetchBinary, warnings, deadline - 500);
+    stylesCss = inlined.css;
+    imageFiles = inlined.files;
+  }
+
   // Sin referrer: muchas webs bloquean sus imágenes si se piden desde otra página
   $('meta[name="referrer" i]').remove();
   const headEl = $("head").length ? $("head") : $("html").prepend("<head></head>").find("head");
@@ -331,8 +481,8 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
     };
   };
 
-  const files = build($, keepScripts);
-  const staticFiles = keepScripts ? build(cheerio.load(snapshot), false) : undefined;
+  const files = { ...build($, keepScripts), ...imageFiles };
+  const staticFiles = keepScripts ? { ...build(cheerio.load(snapshot), false), ...imageFiles } : undefined;
 
   const css = analyzeCss(stylesCss);
   const dependencies = detectDependencies(files);
