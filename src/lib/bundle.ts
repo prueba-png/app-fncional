@@ -70,8 +70,9 @@ function bridgeScript(pages: string[]): string {
  * ("Storage is disabled inside 'sandboxed' iframes"), y muchas webs reales llaman a eso nada más
  * arrancar (ajustes, analítica, flags...): si no se captura, el script entero se detiene ahí y en
  * pantalla solo queda lo que hubiera estático (a veces, literalmente el aviso de "activa JavaScript").
- * Este script se inyecta el primero de todos y sustituye el almacenamiento por uno en memoria (que se
- * pierde al recargar, pero no rompe nada) solo cuando el real no es accesible; si funciona, no toca nada.
+ * Este script se inyecta el primero de todos y sustituye el almacenamiento (y, por la misma razón,
+ * `document.cookie`) por uno en memoria (que se pierde al recargar, pero no rompe nada) solo cuando
+ * el real no es accesible; si funciona, no toca nada.
  */
 function storagePolyfillScript(): string {
   return `<script>(function(){
@@ -93,6 +94,19 @@ function storagePolyfillScript(): string {
   }
   patch("localStorage");
   patch("sessionStorage");
+  // Lo mismo le pasa a document.cookie (muchas webs lo leen nada más arrancar: consentimiento de
+  // cookies, analítica, sesión...): también lanza un error en vez de devolver una cadena vacía.
+  (function(){
+    try { var c = document.cookie; document.cookie = "__t=1"; return; } catch(e) {}
+    var jar = "";
+    try {
+      Object.defineProperty(document, "cookie", {
+        configurable: true,
+        get: function(){ return jar; },
+        set: function(v){ var pair = String(v).split(";")[0]; jar = jar ? jar + "; " + pair : pair; },
+      });
+    } catch(e) {}
+  })();
 })();</script>`;
 }
 

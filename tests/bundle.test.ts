@@ -77,6 +77,32 @@ describe("almacenamiento en el iframe sin allow-same-origin", () => {
     expect(typeof (fakeWindow.sessionStorage as { setItem: unknown }).setItem).toBe("function");
   });
 
+  it("sustituye document.cookie por uno en memoria cuando el real lanza un error", () => {
+    const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { bridge: false, autoInjectDeps: false });
+    const script = html.match(/<script>([\s\S]*?patch\("sessionStorage"\);[\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+
+    const fakeWindow: Record<string, unknown> = { localStorage: { setItem() {}, removeItem() {} }, sessionStorage: { setItem() {}, removeItem() {} } };
+    const fakeDocument: Record<string, unknown> = {};
+    Object.defineProperty(fakeDocument, "cookie", {
+      get() {
+        throw new Error("Failed to read the 'cookie' property from 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag.");
+      },
+      set() {
+        throw new Error("Failed to set the 'cookie' property on 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag.");
+      },
+      configurable: true,
+    });
+
+    new Function("window", "document", script!)(fakeWindow, fakeDocument);
+
+    expect(() => {
+      fakeDocument.cookie = "a=1";
+    }).not.toThrow();
+    fakeDocument.cookie = "b=2";
+    expect(fakeDocument.cookie).toBe("a=1; b=2");
+  });
+
   it("no toca el almacenamiento si ya funciona", () => {
     const html = buildPreviewDocument({ "index.html": "<html><head></head><body><p>x</p></body></html>" }, { bridge: false, autoInjectDeps: false });
     const script = html.match(/<script>([\s\S]*?patch\("sessionStorage"\);[\s\S]*?)<\/script>/)?.[1];
