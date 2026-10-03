@@ -290,6 +290,59 @@ const STATIC_FIXES = `
 [data-aos], [data-sal], .wow, .aos-init, [data-scroll-reveal], .reveal, .js-reveal, [data-animate] { opacity: 1 !important; transform: none !important; visibility: visible !important; }
 `;
 
+const COOKIE_BANNER_SELECTORS = [
+  "#onetrust-banner-sdk", "#onetrust-consent-sdk", ".onetrust-pc-dark-filter",
+  "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay",
+  "#qc-cmp2-container", "#didomi-host", ".didomi-popup-backdrop", ".didomi-consent-popup-backdrop",
+  "#usercentrics-root", "#cookie-law-info-bar", "#cookie-law-info-again",
+  "#cmplz-cookiebanner-container", ".cmplz-cookiebanner",
+  "#iubenda-cs-banner", ".iubenda-cs-container",
+  "#truste-consent-track", "#trustarc-banner-overlay",
+  "#borlabs-cookie-box", "#sp_message_container",
+  "[class*=cookie-consent-banner]", "[id*=cookie-consent]", "[class*=cookiebanner]",
+];
+const COOKIE_WORD_RE = /\bcookies?\b/i;
+const CONSENT_BUTTON_RE = /\b(aceptar|rechazar|acepto|permitir|configurar|preferencias|manage|accept all|reject all|i agree|allow all|settings)\b/i;
+
+/**
+ * Quita el aviso de cookies que tapa el resto de la página: como se descarga el HTML sin ejecutar nada
+ * (una visita anónima de verdad vería lo mismo), el clon se queda con el aviso encima tal cual lo vería
+ * un visitante que nunca ha aceptado nada. No hay forma de "pulsar Aceptar" en una descarga sin navegador,
+ * así que se quita el aviso del propio HTML para que se vea el contenido real de la página de una vez.
+ */
+function removeCookieBanners($: cheerio.CheerioAPI, warnings: string[]): void {
+  let removed = 0;
+  for (const sel of COOKIE_BANNER_SELECTORS) {
+    const el = $(sel);
+    if (el.length) {
+      el.remove();
+      removed++;
+    }
+  }
+  // Heurística genérica (avisos hechos a medida, sin usar un proveedor conocido): un diálogo/overlay con
+  // la palabra "cookie(s)" y al menos un botón típico de aceptar/rechazar/configurar.
+  $('[role="dialog"], [aria-modal="true"], [class*=modal], [class*=overlay], [class*=popup], [class*=banner], [id*=modal], [id*=overlay], [id*=popup], [id*=banner]').each((_, el) => {
+    const $el = $(el);
+    if (!$el.parent().length) return; // ya se quitó como descendiente de otro quitado antes
+    const text = $el.text();
+    if (!COOKIE_WORD_RE.test(text)) return;
+    const hasButton = $el.find("button, a, input[type=button]").toArray().some((b) => CONSENT_BUTTON_RE.test($(b).text()));
+    if (hasButton) {
+      $el.remove();
+      removed++;
+    }
+  });
+  if (removed) {
+    // Los avisos de cookies suelen bloquear el scroll del fondo mientras están abiertos; se revierte.
+    for (const sel of ["html", "body"]) {
+      const el = $(sel);
+      const style = (el.attr("style") ?? "").replace(/overflow\s*:\s*hidden\s*;?/gi, "");
+      if (style !== (el.attr("style") ?? "")) el.attr("style", style);
+    }
+    warnings.push(`Se quitó ${removed > 1 ? `un aviso de cookies (${removed} elementos)` : "un aviso de cookies"} que tapaba el contenido real de la página.`);
+  }
+}
+
 function formatHtml(html: string): string {
   // Normalización ligera: elimina líneas vacías múltiples conservando el contenido original.
   return html.replace(/\n\s*\n\s*\n+/g, "\n\n").trim() + "\n";
@@ -312,6 +365,7 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
   const baseHref = $("base[href]").attr("href");
   const base = baseHref ? absolutize(baseHref, base0)! : base0;
   $("base").remove();
+  removeCookieBanners($, warnings);
 
   // --- análisis sobre el documento original ---
   const a11y = auditAccessibility($);

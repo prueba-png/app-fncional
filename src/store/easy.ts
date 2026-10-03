@@ -549,7 +549,7 @@ export const useEasy = create<EasyState>((set, get) => {
         // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
         // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
         // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
-        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador/i;
+        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador|se quitó.*aviso de cookies|imagen\(es\) no se pudieron descargar/i;
         if (refineNote) note = refineNote;
         if (!note) {
           const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));

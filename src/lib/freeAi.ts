@@ -181,6 +181,7 @@ async function readSse(
   res: Response,
   onData: (data: string) => void,
   signal: AbortSignal,
+  stallMs = STALL_MS,
 ) {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
@@ -190,10 +191,13 @@ async function readSse(
       await reader.cancel().catch(() => {});
       break;
     }
-    // Vigilante de conexión colgada: si no llegan datos en STALL_MS, se corta y se reintenta
+    // Vigilante de conexión colgada: si no llegan datos en stallMs, se corta y se reintenta. Con la
+    // herramienta de leer la web activada, el modelo puede tardar bastante en devolver el primer byte
+    // (está visitando la página en su servidor, sin emitir nada mientras tanto): no es la conexión del
+    // usuario la que falla, así que ese caso necesita un margen mayor que el normal.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stall = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("La conexión se cortó (sin respuesta).")), STALL_MS);
+      timer = setTimeout(() => reject(new Error("La conexión se cortó (sin respuesta).")), stallMs);
     });
     let result: ReadableStreamReadResult<Uint8Array>;
     try {
@@ -443,6 +447,7 @@ async function geminiOnce(
             };
         },
         signal,
+        withUrlTool || req.webSearch ? 60_000 : STALL_MS,
       ),
   );
   if (signal.aborted) throw aborted();
