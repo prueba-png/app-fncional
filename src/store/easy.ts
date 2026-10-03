@@ -630,8 +630,12 @@ ${instruction ? `- INSTRUCCIÓN DEL USUARIO (prioritaria): ${instruction}\n` : "
           refs.labels,
           {
             webFetch: true,
+            // Antes, cuando sí se conseguía una captura, no se avisaba de nada: el usuario recibía una
+            // reconstrucción de la IA creyendo que era la descarga exacta del código. Ahora se avisa
+            // siempre que se cae a este camino (la web bloqueó la descarga automática de su código),
+            // para que quede claro por qué esto no es una copia exacta del código original.
             note: ref
-              ? undefined
+              ? "Esta web bloqueó la descarga automática de su código (algunas lo hacen a propósito), así que la IA la ha reconstruido a partir de una captura real: el diseño y las imágenes visibles se parecen mucho, pero no es una copia exacta del código, y las partes que dependen del servidor original (inicio de sesión, formularios reales, datos en vivo) no van a funcionar. Para que la descarga exacta tenga más posibilidades, prueba a configurar tu propio servidor de descarga (proxy) en Ajustes."
               : "No se pudo descargar el código original de esta web, así que la IA la ha reconstruido a partir de su contenido: los textos son fieles y el diseño puede variar. Para más exactitud, sube también una captura.",
             refine: ref && get().precision === "exact" ? () => refineAgainst(ref!, 2) : undefined,
           },
