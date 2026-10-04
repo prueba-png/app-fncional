@@ -714,11 +714,12 @@ function ResultScreen() {
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
-  // Si el proyecto viene de clonar una URL real, los cambios también pueden necesitar consultarla de nuevo
-  // (p. ej. «añade el mismo formulario de contacto que tiene la web»): se activa la herramienta de
-  // navegación aunque el usuario no vuelva a escribir la URL en su petición de cambio.
+  // Si el proyecto viene de clonar una URL real y el propio cambio pide algo "de la página oficial/real"
+  // (no cualquier cambio: eso obligaría a releer la web entera en CADA edición y lo volvería lentísimo),
+  // se activa la herramienta de navegación hacia esa URL aunque no la repita en el texto.
   const originIsUrl = project.origin?.type === "url" && /^https?:\/\//i.test(project.origin.detail ?? "");
-  const needsWebFetch = (text: string) => originIsUrl || TEXT_URL_RE.test(text);
+  const OFFICIAL_RE = /\boficial|p[aá]gina real|web real|tal\s*(?:y\s*)?como\s*(?:est[aá]|aparece|lo tiene|la tiene)|exactamente\s*(?:igual|como)|id[eé]ntic[oa]|como\s*(?:en|tiene)\s*la\s*p[aá]gina|dato[s]?\s*reales?/i;
+  const needsWebFetch = (text: string) => TEXT_URL_RE.test(text) || (originIsUrl && OFFICIAL_RE.test(text));
 
   const addImages = (files: File[]) => {
     const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(f.name));
