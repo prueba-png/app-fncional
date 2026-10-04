@@ -122,3 +122,24 @@ describe("scripts inyectados en la vista previa", () => {
     expect(html).toContain("/^https?:\\/\\//i");
   });
 });
+
+describe("enlaces absolutos a la propia web clonada", () => {
+  it("no abre fuera un enlace absoluto a la misma web (debe quedarse dentro del proyecto)", () => {
+    const html = buildPreviewDocument(
+      { "index.html": `<html><head></head><body><a href="https://sitio-original.test/ofertas">Ofertas</a></body></html>` },
+      { baseUrl: "https://sitio-original.test/" },
+    );
+    const script = html.match(/<script>([\s\S]*?baseOrigin[\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+    expect(script).toContain('"https://sitio-original.test"');
+    expect(script).toContain("sameSiteAsOriginal");
+  });
+
+  it("sigue abriendo fuera un enlace a un dominio distinto (de verdad externo)", () => {
+    const html = buildPreviewDocument(
+      { "index.html": `<html><head></head><body><a href="https://redsocial.test/perfil">Síguenos</a></body></html>` },
+      { baseUrl: "https://sitio-original.test/" },
+    );
+    expect(html).toContain("window.open(a.href");
+  });
+});

@@ -19,7 +19,14 @@ import {
   buildFilesContext,
 } from "../../shared/prompts";
 
-const MAX_FILE_CHARS = 400_000;
+// El límite debe ir según el contexto real del modelo, no un número fijo para cualquiera: Gemini (flash)
+// admite ~1M tokens, los modelos de pago de Claude suelen rondar 200k; los gratuitos de OpenRouter
+// elegidos aquí garantizan un mínimo de 32k tokens (ver discoverOpenRouterModels), bastante menos. Antes
+// un único límite de 400.000 caracteres (~100k tokens) hacía fallar sin necesidad clones grandes y reales
+// en Gemini (sitios como un concesionario de coches o un banco, con mucho CSS/HTML), y a la vez podía ser
+// demasiado para el modelo gratuito de OpenRouter más pequeño que se llegara a elegir.
+const MAX_FILE_CHARS_GEMINI = 1_500_000;
+const MAX_FILE_CHARS_OPENROUTER = 110_000;
 /** Tiempo máximo para conectar antes de dar la conexión por caída (una conexión colgada no debe tardar minutos en fallar) */
 const CONNECT_TIMEOUT_MS = 20_000;
 
@@ -151,13 +158,13 @@ function systemText(req: ChatRequest): string {
 }
 
 /** Texto de la última petición: adjuntos de texto, ficheros actuales y lo que pide el usuario */
-function requestText(req: ChatRequest): { before: string[]; after: string[] } {
+function requestText(req: ChatRequest, maxChars: number): { before: string[]; after: string[] } {
   const before: string[] = [];
   for (const a of req.attachments ?? [])
     if (a.type === "text")
       before.push(`${a.label ? `Adjunto "${a.label}":\n` : ""}${a.text}`);
   const after = [
-    buildFilesContext(req.files, req.activeFile, MAX_FILE_CHARS),
+    buildFilesContext(req.files, req.activeFile, maxChars),
     `Petición del usuario:\n${req.prompt}`,
   ];
   return { before, after };
@@ -369,7 +376,7 @@ async function geminiOnce(
       role: t.role === "assistant" ? "model" : "user",
       parts: [{ text: t.text }],
     }));
-  const { before, after } = requestText(req);
+  const { before, after } = requestText(req, MAX_FILE_CHARS_GEMINI);
   contents.push({
     role: "user",
     parts: [
@@ -674,7 +681,7 @@ async function openRouterOnce(
   ];
   for (const t of history(req))
     messages.push({ role: t.role, content: t.text });
-  const { before, after } = requestText(req);
+  const { before, after } = requestText(req, MAX_FILE_CHARS_OPENROUTER);
   const parts: Exclude<OrContent, string> = before.map((text) => ({
     type: "text" as const,
     text,

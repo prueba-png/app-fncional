@@ -43,9 +43,9 @@ function toDataUrl(path: string, content: string): string {
 const escapeForTag = (content: string, tag: "script" | "style") => content.replace(new RegExp(`</${tag}`, "gi"), `<\\/${tag}`);
 
 /** Script inyectado en el iframe: reenvía consola/errores y navegación entre páginas locales. */
-function bridgeScript(pages: string[]): string {
+function bridgeScript(pages: string[], baseOrigin?: string): string {
   return `<script>(function(){
-  var F=${JSON.stringify(BRIDGE_FLAG)}, pages=${JSON.stringify(pages)};
+  var F=${JSON.stringify(BRIDGE_FLAG)}, pages=${JSON.stringify(pages)}, baseOrigin=${JSON.stringify(baseOrigin ?? "")};
   function ser(v){try{if(v instanceof Error)return v.name+': '+v.message;if(typeof v==='object'&&v!==null){var s=JSON.stringify(v,null,1);return s&&s.length>2000?s.slice(0,2000)+'…':s}return String(v)}catch(e){return String(v)}}
   function send(level,args){try{parent.postMessage({flag:F,type:'console',level:level,args:Array.prototype.map.call(args,ser)},'*')}catch(e){}}
   ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){send(l,arguments);return o&&o.apply(console,arguments)}});
@@ -55,7 +55,16 @@ function bridgeScript(pages: string[]): string {
     var a=e.target&&e.target.closest?e.target.closest('a[href]'):null; if(!a)return;
     var href=a.getAttribute('href')||'';
     if(/^#/.test(href)){e.preventDefault();var id=decodeURIComponent(href.slice(1));var t=id&&(document.getElementById(id)||document.getElementsByName(id)[0]);if(t)t.scrollIntoView({behavior:'smooth'});else if(!id||id==='top')window.scrollTo({top:0,behavior:'smooth'});return;}
-    if(/^https?:\\/\\//i.test(href)||/^\\/\\//.test(href)){e.preventDefault();window.open(a.href,'_blank','noopener');return;}
+    if(/^https?:\\/\\//i.test(href)||/^\\/\\//.test(href)){
+      // Un enlace absoluto a la MISMA web que se clonó (p. ej. su <base> resuelve "/ofertas" como
+      // "https://sitio.com/ofertas") no es un enlace externo de verdad: es otra página de ese sitio que
+      // este clon (de una sola página) no tiene. Sacar de la vista previa a la web real no es lo que
+      // se pidió, así que se trata igual que un enlace local que no existe, en vez de abrirlo fuera.
+      var sameSiteAsOriginal=false;
+      try { sameSiteAsOriginal = !!baseOrigin && (a.protocol+'//'+a.host)===baseOrigin; } catch(e) {}
+      if(sameSiteAsOriginal){e.preventDefault();send('warn',['Esta web clonada es de una sola página: '+href+' no está incluido en el proyecto.']);return;}
+      e.preventDefault();window.open(a.href,'_blank','noopener');return;
+    }
     var clean=href.split('#')[0].split('?')[0].replace(/^\\.\\//,'').replace(/^\\//,'');
     if(pages.indexOf(clean)!==-1){e.preventDefault();parent.postMessage({flag:F,type:'navigate',path:clean},'*');}
     else if(!/^[a-z]+:/i.test(href)&&!/^\\/\\//.test(href)){e.preventDefault();send('warn',['Enlace local no encontrado en el proyecto: '+href]);}
@@ -205,7 +214,15 @@ export function buildPreviewDocument(files: FileMap, opts: BuildOptions = {}): s
   }
 
   if (bridge) {
-    const script = bridgeScript(pages);
+    let baseOrigin: string | undefined;
+    if (opts.baseUrl) {
+      try {
+        baseOrigin = new URL(opts.baseUrl).origin;
+      } catch {
+        /* baseUrl no es una URL válida: se ignora */
+      }
+    }
+    const script = bridgeScript(pages, baseOrigin);
     if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${script}`);
     else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => `${m}<head>${script}</head>`);
     else html = script + html;

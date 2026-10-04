@@ -274,3 +274,28 @@ describe("transcribeAudio (dictado por voz en Safari, sin SpeechRecognition)", (
     await expect(transcribeAudio("clave-mala", "AAAA", "audio/webm")).rejects.toThrow(/clave de Google no es válida/);
   });
 });
+
+describe("límite de tamaño del proyecto (por proveedor, según su contexto real)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Gemini acepta un proyecto grande y real que antes fallaba con el límite plano de 400.000 caracteres", async () => {
+    // Un index.html + styles.css grandes (como un sitio real con mucho CSS), bastante por encima de 400.000
+    // caracteres en total, pero muy por debajo de lo que admite el contexto de Gemini.
+    const bigCss = "body{color:#111}\n".repeat(30_000); // ~480.000 caracteres
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-grande");
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } }]);
+    });
+    const req = { ...makeReq("k-grande-gemini"), files: { "index.html": "<h1>x</h1>", "styles.css": bigCss } };
+    const events: ChatStreamEvent[] = [];
+    await streamGemini(req, (e) => events.push(e), new AbortController().signal);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("OpenRouter sigue avisando con un mensaje claro si el proyecto no cabe en su límite (más bajo, por sus modelos gratuitos)", async () => {
+    const bigCss = "body{color:#111}\n".repeat(30_000); // ~480.000 caracteres: cabe en Gemini, no en OpenRouter
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ data: [{ id: "modelo-gratis:free", context_length: 32_000 }] })));
+    const req = { ...makeReq("sk-or-v1-grande"), files: { "index.html": "<h1>x</h1>", "styles.css": bigCss } };
+    await expect(streamOpenRouter(req, () => {}, new AbortController().signal)).rejects.toThrow(/supera.*caracteres/i);
+  });
+});
