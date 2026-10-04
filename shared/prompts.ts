@@ -70,6 +70,23 @@ El prompt mejorado debe:
 - Mantenerse en un solo párrafo o una lista corta de viñetas: no te extiendas más de lo necesario para que sea un prompt claro, no un informe.
 - Si el usuario ya fue muy concreto y detallado, no inventes nada nuevo: limítate a ordenar y pulir la redacción.`;
 
+/** Presupuestos de caracteres por proveedor de IA, según el contexto real que admite cada uno. */
+export const FILE_CHAR_BUDGET_GEMINI = 1_500_000;
+export const FILE_CHAR_BUDGET_ANTHROPIC = 600_000;
+export const FILE_CHAR_BUDGET_OPENROUTER = 110_000;
+
+/** El mismo contenido que se envía al asistente por cada fichero (una imagen recortada se omite). */
+function fileContextContent(rawContent: string): string {
+  return /^data:[a-z]+\/[\w.+-]+;base64,/i.test(rawContent) ? "(imagen recortada de la captura: no reescribas este fichero)" : rawContent;
+}
+
+/** Caracteres que ocuparía el proyecto en la petición al asistente (misma cuenta que usa `buildFilesContext`). */
+export function filesContextChars(files: Record<string, string>): number {
+  let total = 0;
+  for (const rawContent of Object.values(files ?? {})) total += fileContextContent(rawContent).length;
+  return total;
+}
+
 /** Contexto con los ficheros actuales del proyecto. Lanza un error si supera `maxChars`. */
 export function buildFilesContext(files: Record<string, string>, activeFile: string | undefined, maxChars: number): string {
   const entries = Object.entries(files ?? {});
@@ -77,13 +94,14 @@ export function buildFilesContext(files: Record<string, string>, activeFile: str
   let total = 0;
   const parts: string[] = [];
   for (const [path, rawContent] of entries) {
-    // Imágenes guardadas en el proyecto (recortes de la captura): no se envía su contenido
-    const content = /^data:[a-z]+\/[\w.+-]+;base64,/i.test(rawContent) ? "(imagen recortada de la captura: no reescribas este fichero)" : rawContent;
+    const content = fileContextContent(rawContent);
     total += content.length;
     if (total > maxChars) {
-      throw new Error(
+      const err = new Error(
         `El proyecto supera ${maxChars.toLocaleString("es")} caracteres; reduce el tamaño de los ficheros (p. ej. elimina CSS no usado) antes de enviarlo al asistente.`,
       );
+      err.name = "SizeError";
+      throw err;
     }
     parts.push(`<current_file path="${path}">\n${content}\n</current_file>`);
   }

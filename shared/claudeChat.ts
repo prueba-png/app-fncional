@@ -6,15 +6,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatRequest, ChatStreamEvent } from "./types";
 import { summarizeFileBlocks } from "./fileBlocks";
-import { IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext } from "./prompts";
+import { IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, FILE_CHAR_BUDGET_ANTHROPIC as MAX_FILE_CHARS } from "./prompts";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
 const FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
-// Los modelos de Claude usados aquí admiten un contexto de 200k tokens: 600.000 caracteres (~150k
-// tokens) deja margen de sobra para las instrucciones, el historial y la respuesta, y antes hacía
-// fallar sin necesidad clones grandes y reales (un concesionario, un banco...) con un límite de 400.000.
-const MAX_FILE_CHARS = 600_000;
 
 export function buildMessages(body: ChatRequest): Anthropic.Beta.BetaMessageParam[] {
   const messages: Anthropic.Beta.BetaMessageParam[] = [];

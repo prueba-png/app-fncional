@@ -11,6 +11,7 @@ import { streamDirect } from "../lib/directAi";
 import { streamGemini, streamOpenRouter } from "../lib/freeAi";
 import { uid } from "../lib/util";
 import { aiAvailable, useStudio } from "./studio";
+import { FILE_CHAR_BUDGET_ANTHROPIC, FILE_CHAR_BUDGET_GEMINI, FILE_CHAR_BUDGET_OPENROUTER, filesContextChars } from "../../shared/prompts";
 
 const HISTORY_TURNS = 12;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -21,23 +22,33 @@ interface ProviderAttempt {
   label: string;
   apiKey?: string;
   run: StreamFn;
+  /** Caracteres de ficheros que admite este proveedor antes de rechazar la petición (ver shared/prompts). */
+  charBudget: number;
 }
 
 /**
  * Lista ordenada de IA a probar: primero la elegida, después las demás que tengan clave.
  * Así, si una agota su cupo gratuito, la app usa otra sin que el usuario tenga que tocar nada.
+ *
+ * Si se pasa `requiredChars` (el tamaño real del proyecto en esta petición), los proveedores que
+ * seguro que lo rechazarían por tamaño (su `charBudget` no llega) se prueban los últimos: así, por
+ * ejemplo, un clon grande no falla solo por haberle tocado de primeras el modelo gratuito de OpenRouter
+ * (contexto mucho más pequeño) cuando Gemini sí tendría sitio de sobra para el mismo proyecto.
  */
-function buildProviderAttempts(studio: ReturnType<typeof useStudio.getState>): ProviderAttempt[] {
+function buildProviderAttempts(studio: ReturnType<typeof useStudio.getState>, requiredChars?: number): ProviderAttempt[] {
   const s = studio.settings;
   const order: db.AiProvider[] = [s.aiProvider, ...(["gemini", "openrouter", "anthropic"] as db.AiProvider[]).filter((p) => p !== s.aiProvider)];
   const out: ProviderAttempt[] = [];
   for (const p of order) {
-    if (p === "gemini" && s.geminiApiKey) out.push({ label: "Google Gemini", apiKey: s.geminiApiKey, run: streamGemini });
-    else if (p === "openrouter" && s.openrouterApiKey) out.push({ label: "OpenRouter", apiKey: s.openrouterApiKey, run: streamOpenRouter });
+    if (p === "gemini" && s.geminiApiKey) out.push({ label: "Google Gemini", apiKey: s.geminiApiKey, run: streamGemini, charBudget: FILE_CHAR_BUDGET_GEMINI });
+    else if (p === "openrouter" && s.openrouterApiKey) out.push({ label: "OpenRouter", apiKey: s.openrouterApiKey, run: streamOpenRouter, charBudget: FILE_CHAR_BUDGET_OPENROUTER });
     else if (p === "anthropic" && (s.anthropicApiKey || studio.health?.hasEnvApiKey))
-      out.push({ label: "Anthropic", apiKey: s.anthropicApiKey || undefined, run: studio.ai === "direct" ? streamDirect : streamChat });
+      out.push({ label: "Anthropic", apiKey: s.anthropicApiKey || undefined, run: studio.ai === "direct" ? streamDirect : streamChat, charBudget: FILE_CHAR_BUDGET_ANTHROPIC });
   }
-  return out;
+  if (requiredChars == null) return out;
+  const fits = out.filter((a) => a.charBudget >= requiredChars);
+  const tooSmall = out.filter((a) => a.charBudget < requiredChars);
+  return [...fits, ...tooSmall];
 }
 
 /**
@@ -205,6 +216,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // omiten del envío (y se reponen después si el fichero vuelve sin tocar esa parte), para no superar el
     // límite de tamaño de la petición por datos que la IA ni necesitaba leer.
     const { files: contextFiles, restore: dataUriRestore } = omitLargeDataUris(useStudio.getState().project!.files);
+    const requiredChars = filesContextChars(contextFiles);
 
     try {
       await useStudio.getState().flush();
@@ -232,8 +244,9 @@ export const useChat = create<ChatState>((set, get) => ({
         model = "Claude (tu cuenta de claude.ai)";
         stopReason = result.truncated ? "max_tokens" : "end_turn";
       } else {
-        // Se prueban las IA disponibles en orden; si una agota su cupo gratuito, salta sola a la siguiente
-        const attempts = buildProviderAttempts(studio);
+        // Se prueban las IA disponibles en orden (la que tenga sitio de sobra para el tamaño real del
+        // proyecto primero); si una agota su cupo gratuito o no tiene contexto suficiente, salta sola a la siguiente
+        const attempts = buildProviderAttempts(studio, requiredChars);
         if (!attempts.length) throw new Error("Conecta la IA gratuita (clave de Google) en Ajustes.");
         const onEvent = (e: import("../../shared/types").ChatStreamEvent) => {
           if (e.type === "text") {
@@ -277,9 +290,10 @@ export const useChat = create<ChatState>((set, get) => ({
             lastErr = err;
             if ((err as Error).name === "AbortError") throw err;
             const name = (err as Error).name;
-            // Se salta al siguiente servicio con clave cuando se agotó el cupo, o cuando la red falló sin
-            // llegar a escribir nada (así no se pierde ni se duplica lo que ya se hubiera generado)
-            if ((name === "QuotaError" || name === "NetworkError") && !text && i < attempts.length - 1) {
+            // Se salta al siguiente servicio con clave cuando se agotó el cupo, cuando el proyecto no cabe
+            // en el contexto de este proveedor (lo probará el siguiente, con más sitio), o cuando la red
+            // falló sin llegar a escribir nada (así no se pierde ni se duplica lo que ya se hubiera generado)
+            if ((name === "QuotaError" || name === "NetworkError" || name === "SizeError") && !text && i < attempts.length - 1) {
               set({ status: `Cambiando a otra IA gratuita (${attempts[i + 1].label})…` });
               continue;
             }
@@ -302,7 +316,7 @@ export const useChat = create<ChatState>((set, get) => ({
       // de rendirse. Se le da como historial su propia respuesta cortada para que sepa dónde seguir.
       try {
         set({ status: "Terminando el fichero cortado…" });
-        const contAttempts = buildProviderAttempts(studio);
+        const contAttempts = buildProviderAttempts(studio, requiredChars);
         const contHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
         let contText = "";
         let contErr: unknown;
@@ -361,7 +375,7 @@ export const useChat = create<ChatState>((set, get) => ({
     if (!parsed.incomplete && !error && !Object.keys(parsed.updated).length && !parsed.deleted.length && !useWeb && !controller.signal.aborted && parsed.prose.trim().length > 0) {
       try {
         set({ status: "Pidiendo el cambio en código (la respuesta anterior no lo incluía)…" });
-        const retryAttempts = buildProviderAttempts(studio);
+        const retryAttempts = buildProviderAttempts(studio, requiredChars);
         const retryHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
         let retryText = "";
         let retryErr: unknown;
@@ -440,7 +454,7 @@ export const useChat = create<ChatState>((set, get) => ({
         // quedara exactamente igual. Se le pide una vez que identifique de verdad qué había que cambiar.
         try {
           set({ status: "Ese fichero no cambió nada de verdad: pidiendo que lo corrija otra vez…" });
-          const retry2Attempts = buildProviderAttempts(studio);
+          const retry2Attempts = buildProviderAttempts(studio, requiredChars);
           const retry2History: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
           let retry2Text = "";
           let retry2Err: unknown;

@@ -18,16 +18,9 @@ import {
   REFERENCE_PROMPT,
   SYSTEM_PROMPT,
   buildFilesContext,
+  FILE_CHAR_BUDGET_GEMINI as MAX_FILE_CHARS_GEMINI,
+  FILE_CHAR_BUDGET_OPENROUTER as MAX_FILE_CHARS_OPENROUTER,
 } from "../../shared/prompts";
-
-// El límite debe ir según el contexto real del modelo, no un número fijo para cualquiera: Gemini (flash)
-// admite ~1M tokens, los modelos de pago de Claude suelen rondar 200k; los gratuitos de OpenRouter
-// elegidos aquí garantizan un mínimo de 32k tokens (ver discoverOpenRouterModels), bastante menos. Antes
-// un único límite de 400.000 caracteres (~100k tokens) hacía fallar sin necesidad clones grandes y reales
-// en Gemini (sitios como un concesionario de coches o un banco, con mucho CSS/HTML), y a la vez podía ser
-// demasiado para el modelo gratuito de OpenRouter más pequeño que se llegara a elegir.
-const MAX_FILE_CHARS_GEMINI = 1_500_000;
-const MAX_FILE_CHARS_OPENROUTER = 110_000;
 /** Tiempo máximo para conectar antes de dar la conexión por caída (una conexión colgada no debe tardar minutos en fallar) */
 const CONNECT_TIMEOUT_MS = 20_000;
 
