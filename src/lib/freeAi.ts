@@ -150,11 +150,27 @@ class ProviderError extends Error {
   }
 }
 
-function systemText(req: ChatRequest): string {
+/**
+ * El SYSTEM_PROMPT dice "si tienes herramienta de navegar la web en esta conversación, visítala", pero
+ * un modelo no siempre sabe fiablemente si la tiene de verdad conectada (sobre todo los gratuitos de
+ * OpenRouter, que aquí nunca la tienen): en vez de adivinar, a veces "simulan" la herramienta escribiendo
+ * una etiqueta de texto con pinta de llamada (p. ej. "<web_fetch>https://...</web_fetch>") como si la
+ * hubiera usado, cuando no ha pasado nada real. Esta línea deja la disponibilidad real explícita cada
+ * vez, para que nunca tenga que adivinarlo ni fingir que la usó.
+ */
+function toolAvailabilityNote(hasFetchTool: boolean, hasSearchTool: boolean): string {
+  if (!hasFetchTool && !hasSearchTool)
+    return "\n\nHerramientas de navegación web en esta conversación: NINGUNA. No tienes forma de visitar ninguna URL ni de buscar en internet ahora mismo. Si la petición depende de eso, dilo claramente en tu explicación en vez de inventar el contenido o de escribir texto que simule haber usado una herramienta (como una etiqueta <web_fetch> u otra parecida): eso no ejecuta nada de verdad y confundiría al usuario.";
+  const parts: string[] = [];
+  if (hasFetchTool) parts.push("puedes visitar una URL real con tu herramienta de navegación (úsala si la petición menciona una)");
+  if (hasSearchTool) parts.push("puedes buscar en internet con tu herramienta de búsqueda");
+  return `\n\nHerramientas de navegación web en esta conversación: SÍ tienes conectada(s) ${parts.join(" y ")}. No hace falta que lo anuncies con una etiqueta de texto: simplemente úsala.`;
+}
+
+function systemText(req: ChatRequest, hasFetchTool: boolean, hasSearchTool: boolean): string {
   if (req.mode === "improve-prompt") return IMPROVE_PROMPT;
-  return req.mode === "generate-from-reference"
-    ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}`
-    : SYSTEM_PROMPT;
+  const base = req.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
+  return base + toolAvailabilityNote(hasFetchTool, hasSearchTool);
 }
 
 /** Texto de la última petición: adjuntos de texto, ficheros actuales y lo que pide el usuario */
@@ -395,7 +411,7 @@ async function geminiOnce(
         "x-goog-api-key": req.apiKey!,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemText(req) }] },
+        systemInstruction: { parts: [{ text: systemText(req, withUrlTool, !!req.webSearch) }] },
         contents,
         generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
         // Con enlace: Gemini puede leer la web él mismo (herramienta gratuita «url_context»)
@@ -677,7 +693,10 @@ async function openRouterOnce(
   signal: AbortSignal,
 ) {
   const messages: Array<{ role: string; content: OrContent }> = [
-    { role: "system", content: systemText(req) },
+    // OpenRouter no tiene aquí ninguna herramienta real de navegación o búsqueda conectada (a diferencia
+    // de Gemini): aunque la petición pida webFetch/webSearch, se le dice la verdad para que no se la
+    // invente ni finja haberla usado.
+    { role: "system", content: systemText(req, false, false) },
   ];
   for (const t of history(req))
     messages.push({ role: t.role, content: t.text });

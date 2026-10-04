@@ -299,3 +299,32 @@ describe("límite de tamaño del proyecto (por proveedor, según su contexto rea
     await expect(streamOpenRouter(req, () => {}, new AbortController().signal)).rejects.toThrow(/supera.*caracteres/i);
   });
 });
+
+describe("aviso honesto de si hay o no herramienta de navegación web (para que no se invente usarla)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("OpenRouter: avisa de que NO tiene ninguna herramienta de navegación, aunque se pida webFetch", async () => {
+    let systemMsg = "";
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a/modelo:free", context_length: 100000 }] }));
+      const body = JSON.parse(String(init!.body));
+      systemMsg = body.messages.find((m: { role: string }) => m.role === "system")?.content ?? "";
+      return sse([{ choices: [{ delta: { content: "ok" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }, "[DONE]"]);
+    });
+    await streamOpenRouter({ ...makeReq("k-or-tool"), webFetch: true }, () => {}, new AbortController().signal);
+    expect(systemMsg).toMatch(/NINGUNA/);
+    expect(systemMsg).toMatch(/no simule haber usado una herramienta|simule haber usado una herramienta/i);
+  });
+
+  it("Gemini: cuando SÍ tiene url_context conectado, lo dice explícitamente (no en condicional)", async () => {
+    let systemMsg = "";
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-tool");
+      const body = JSON.parse(String(init!.body));
+      systemMsg = body.systemInstruction.parts[0].text;
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } }]);
+    });
+    await streamGemini({ ...makeReq("k-gemini-tool"), webFetch: true }, () => {}, new AbortController().signal);
+    expect(systemMsg).toMatch(/SÍ tienes conectada/);
+  });
+});

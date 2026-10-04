@@ -80,10 +80,16 @@ export async function runClaudeChat(
   const model = body.model?.trim() || DEFAULT_MODEL;
   const useFallbacks = FALLBACK_MODELS.has(model);
   const supportsAdaptive = !model.startsWith("claude-haiku");
-  const system = body.mode === "improve-prompt" ? IMPROVE_PROMPT : body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
   const tools: Anthropic.Beta.BetaToolUnion[] | undefined = body.webFetch
     ? [{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 4, max_content_tokens: 100_000 }]
     : undefined;
+  // El SYSTEM_PROMPT describe la herramienta de navegación en condicional ("si la tienes"): un modelo no
+  // siempre sabe con fiabilidad si está conectada de verdad, y puede acabar "simulando" su uso con una
+  // etiqueta de texto en vez de decir honestamente que no la tiene. Se deja explícito en cada petición.
+  const toolNote = tools
+    ? "\n\nHerramientas de navegación web en esta conversación: SÍ tienes conectada la de visitar una URL real (web_fetch). No hace falta que lo anuncies con una etiqueta de texto: simplemente úsala."
+    : "\n\nHerramientas de navegación web en esta conversación: NINGUNA. No tienes forma de visitar ninguna URL ni de buscar en internet ahora mismo. Si la petición depende de eso, dilo claramente en tu explicación en vez de inventar el contenido o de escribir texto que simule haber usado una herramienta (como una etiqueta <web_fetch> u otra parecida): eso no ejecuta nada de verdad y confundiría al usuario.";
+  const system = (body.mode === "improve-prompt" ? IMPROVE_PROMPT : body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT) + toolNote;
 
   let current: ReturnType<typeof client.beta.messages.stream> | null = null;
   const onAbort = () => current?.abort();
