@@ -12,6 +12,7 @@ import type {
 } from "../../shared/types";
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
 import { sanitizeKey } from "./util";
+import { relayFetcher } from "./proxyIngest";
 import {
   IMPROVE_PROMPT,
   REFERENCE_PROMPT,
@@ -686,17 +687,58 @@ type OrContent =
       | { type: "image_url"; image_url: { url: string } }
     >;
 
+interface OrToolCall {
+  id: string;
+  function: { name: string; arguments: string };
+}
+interface OrMessage {
+  role: string;
+  content: OrContent;
+  tool_calls?: OrToolCall[];
+  tool_call_id?: string;
+}
+
+/** Lo que de verdad hace la herramienta «fetch_url»: descarga la página con los mismos servicios de
+ * reenvío que usa «Clonar una web», y devuelve su HTML real (recortado) para que el modelo lo lea. */
+const TOOL_FETCH_MAX_CHARS = 20_000;
+async function fetchUrlForTool(rawUrl: string): Promise<string> {
+  try {
+    const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+    const res = await relayFetcher(url, { accept: "text/html", timeoutMs: 15_000, maxBytes: 3_000_000 });
+    const text = res.text.length > TOOL_FETCH_MAX_CHARS ? `${res.text.slice(0, TOOL_FETCH_MAX_CHARS)}\n…(cortado por tamaño)` : res.text;
+    return `HTML real de ${res.finalUrl}:\n\n${text}`;
+  } catch (err) {
+    return `No se pudo descargar esa URL: ${(err as Error).message}`;
+  }
+}
+
+const FETCH_URL_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "fetch_url",
+    description: "Descarga el HTML real de una página pública para poder copiar su contenido, estilos y estructura exactos en vez de aproximarlos.",
+    parameters: {
+      type: "object",
+      properties: { url: { type: "string", description: "URL completa (con https://) de la página a descargar" } },
+      required: ["url"],
+    },
+  },
+};
+/** Nº máximo de idas y vueltas pidiendo páginas antes de forzar una respuesta final de todos modos. */
+const MAX_TOOL_ROUNDS = 4;
+
 async function openRouterOnce(
   model: string,
   req: ChatRequest,
   emit: Emit,
   signal: AbortSignal,
 ) {
-  const messages: Array<{ role: string; content: OrContent }> = [
-    // OpenRouter no tiene aquí ninguna herramienta real de navegación o búsqueda conectada (a diferencia
-    // de Gemini): aunque la petición pida webFetch/webSearch, se le dice la verdad para que no se la
-    // invente ni finja haberla usado.
-    { role: "system", content: systemText(req, false, false) },
+  const hasFetchTool = !!req.webFetch;
+  const messages: OrMessage[] = [
+    // A diferencia de Gemini, aquí la herramienta de navegación (fetch_url) no la ejecuta OpenRouter por
+    // su cuenta: la ejecutamos nosotros cuando el modelo la pide (ver más abajo), y solo si el modelo
+    // elegido admite "tools" de verdad. Por eso el aviso depende de hasFetchTool, no solo de si se pidió.
+    { role: "system", content: systemText(req, hasFetchTool, false) },
   ];
   for (const t of history(req))
     messages.push({ role: t.role, content: t.text });
@@ -715,6 +757,52 @@ async function openRouterOnce(
   }
   for (const text of after) parts.push({ type: "text", text });
   messages.push({ role: "user", content: parts });
+
+  if (hasFetchTool) {
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      let data: { choices?: Array<{ message?: OrMessage; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; error?: { message?: string; code?: number } };
+      const toolRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${req.apiKey}`, "X-Title": "Ganx" },
+        body: JSON.stringify({ model, messages, stream: false, temperature: 0.3, max_tokens: 16000, tools: [FETCH_URL_TOOL], tool_choice: "auto" }),
+        signal: withConnectTimeout(signal),
+      });
+      if (!toolRes.ok) break; // el modelo elegido probablemente no admite "tools": se sigue sin ellas más abajo
+      try {
+        data = await toolRes.json();
+      } catch {
+        break;
+      }
+      if (data.error) break;
+      const msg = data.choices?.[0]?.message;
+      const calls = msg?.tool_calls ?? [];
+      if (!calls.length) {
+        // Ya tiene la respuesta final (no hizo falta más vueltas): se emite tal cual, sin pasar por streaming.
+        if (msg?.content) emit({ type: "text", text: typeof msg.content === "string" ? msg.content : "" });
+        emit({
+          type: "done",
+          stopReason: data.choices?.[0]?.finish_reason === "length" ? "max_tokens" : "end_turn",
+          usage: data.usage ? { input: data.usage.prompt_tokens ?? 0, output: data.usage.completion_tokens ?? 0 } : undefined,
+          model: `${model} (gratis)`,
+        });
+        return;
+      }
+      emit({ type: "status", message: "Visitando la web…" });
+      messages.push({ role: "assistant", content: msg?.content ?? "", tool_calls: calls });
+      for (const call of calls) {
+        let url = "";
+        try {
+          url = (JSON.parse(call.function.arguments) as { url?: string }).url ?? "";
+        } catch {
+          /* argumentos no válidos: se trata como URL vacía */
+        }
+        const result = url ? await fetchUrlForTool(url) : "Falta la URL en la llamada a la herramienta.";
+        messages.push({ role: "tool", tool_call_id: call.id, content: result });
+      }
+    }
+    // Se acabaron las vueltas (o el modelo no admite "tools"): se pide la respuesta final ya sin
+    // herramientas, con lo que se haya conseguido leer hasta ahora en el propio historial de mensajes.
+  }
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

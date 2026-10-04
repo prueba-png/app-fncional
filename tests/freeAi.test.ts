@@ -303,7 +303,7 @@ describe("límite de tamaño del proyecto (por proveedor, según su contexto rea
 describe("aviso honesto de si hay o no herramienta de navegación web (para que no se invente usarla)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("OpenRouter: avisa de que NO tiene ninguna herramienta de navegación, aunque se pida webFetch", async () => {
+  it("OpenRouter: avisa de que NO tiene ninguna herramienta de navegación si no se pidió webFetch", async () => {
     let systemMsg = "";
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a/modelo:free", context_length: 100000 }] }));
@@ -311,9 +311,50 @@ describe("aviso honesto de si hay o no herramienta de navegación web (para que 
       systemMsg = body.messages.find((m: { role: string }) => m.role === "system")?.content ?? "";
       return sse([{ choices: [{ delta: { content: "ok" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }, "[DONE]"]);
     });
-    await streamOpenRouter({ ...makeReq("k-or-tool"), webFetch: true }, () => {}, new AbortController().signal);
+    await streamOpenRouter(makeReq("k-or-sin-tool"), () => {}, new AbortController().signal);
     expect(systemMsg).toMatch(/NINGUNA/);
     expect(systemMsg).toMatch(/no simule haber usado una herramienta|simule haber usado una herramienta/i);
+  });
+
+  it("OpenRouter: con webFetch pedido, usa de verdad una herramienta fetch_url (descarga la página real, no se la inventa)", async () => {
+    const pageHtml = "<!doctype html><html><head><title>Sitio real</title></head><body><h1>Contenido real del sitio</h1></body></html>";
+    let finalSystemMsg = "";
+    let toolRounds = 0;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "a/modelo-con-tools:free", context_length: 100000 }] }));
+      // La propia herramienta descarga la página por el mismo servicio de reenvío que "Clonar una web"
+      if (url.includes("allorigins.win") || url.includes("codetabs.com")) {
+        return new Response(pageHtml, { headers: { "content-type": "text/html" } });
+      }
+      const body = JSON.parse(String(init!.body));
+      if (body.stream === false) {
+        toolRounds++;
+        if (toolRounds === 1) {
+          // Primera vuelta: el modelo pide la herramienta
+          return new Response(
+            JSON.stringify({
+              choices: [{ message: { role: "assistant", tool_calls: [{ id: "call_1", function: { name: "fetch_url", arguments: JSON.stringify({ url: "https://sitio-real.test/" }) } }] }, finish_reason: "tool_calls" }],
+            }),
+          );
+        }
+        // Segunda vuelta: ya tiene el HTML real (se lo pasamos como mensaje "tool") y da la respuesta final
+        const toolMsg = body.messages.find((m: { role: string }) => m.role === "tool");
+        finalSystemMsg = body.messages.find((m: { role: string }) => m.role === "system")?.content ?? "";
+        expect(toolMsg?.content).toContain("Contenido real del sitio");
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: "assistant", content: "<file path=\"index.html\">\n<h1>Contenido real del sitio</h1>\n</file>" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 10, completion_tokens: 10 },
+          }),
+        );
+      }
+      throw new Error("no debería llegar a una llamada en streaming: la herramienta ya resolvió la respuesta final");
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamOpenRouter({ ...makeReq("k-or-tool"), webFetch: true }, (e) => events.push(e), new AbortController().signal);
+    expect(toolRounds).toBe(2);
+    expect(finalSystemMsg).toMatch(/SÍ tienes conectada/);
+    expect(events.some((e) => e.type === "text" && e.text.includes("Contenido real del sitio"))).toBe(true);
   });
 
   it("Gemini: cuando SÍ tiene url_context conectado, lo dice explícitamente (no en condicional)", async () => {
