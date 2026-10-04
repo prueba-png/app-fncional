@@ -717,9 +717,18 @@ function ResultScreen() {
   // Si el proyecto viene de clonar una URL real y el propio cambio pide algo "de la página oficial/real"
   // (no cualquier cambio: eso obligaría a releer la web entera en CADA edición y lo volvería lentísimo),
   // se activa la herramienta de navegación hacia esa URL aunque no la repita en el texto.
+  // Excepción: un logo/icono "oficial" NO necesita visitar la web entera, porque el sistema ya tiene un
+  // atajo rápido para eso (el servicio de favicons de Google, ya es el logo real del dominio); forzar la
+  // navegación completa ahí solo lo hace mucho más lento sin ganar nada.
   const originIsUrl = project.origin?.type === "url" && /^https?:\/\//i.test(project.origin.detail ?? "");
   const OFFICIAL_RE = /\boficial|p[aá]gina real|web real|tal\s*(?:y\s*)?como\s*(?:est[aá]|aparece|lo tiene|la tiene)|exactamente\s*(?:igual|como)|id[eé]ntic[oa]|como\s*(?:en|tiene)\s*la\s*p[aá]gina|dato[s]?\s*reales?/i;
-  const needsWebFetch = (text: string) => TEXT_URL_RE.test(text) || (originIsUrl && OFFICIAL_RE.test(text));
+  const LOGO_RE = /\b(?:logo|logotipo|icono|favicon)s?\b/i;
+  const OTHER_CONTENT_RE = /men[uú]|\btexto|contenido|secci[oó]n|p[aá]rrafo|tabla|precio|tarifa|formulario|enlace|\bfooter\b|pie de p[aá]gina|aviso legal|t[eé]rminos|horario|direcci[oó]n|tel[eé]fono/i;
+  // Pedir el logo/icono "oficial" no necesita visitar la web entera: ya hay un atajo rápido para eso (el
+  // servicio de favicons de Google, que ya es el icono real del dominio). Solo se activa la navegación
+  // completa si, además del logo, el cambio también pide otro contenido real de la página.
+  const needsWebFetch = (text: string) =>
+    TEXT_URL_RE.test(text) || (originIsUrl && OFFICIAL_RE.test(text) && (!LOGO_RE.test(text) || OTHER_CONTENT_RE.test(text)));
 
   const addImages = (files: File[]) => {
     const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(f.name));
