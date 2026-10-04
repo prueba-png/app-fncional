@@ -17,3 +17,10 @@ describe("instrucciones de fidelidad de logotipos", () => {
     expect(SYSTEM_PROMPT).toMatch(/nunca ve un hueco/i);
   });
 });
+
+describe("fidelidad a instrucciones largas o con varios pasos", () => {
+  it("SYSTEM_PROMPT exige cumplir todos los puntos de un flujo largo, no solo el primero", () => {
+    expect(SYSTEM_PROMPT).toMatch(/varios pasos, puntos o condiciones encadenadas/i);
+    expect(SYSTEM_PROMPT).toMatch(/no resumas ni simplifiques el flujo pedido/i);
+  });
+});
