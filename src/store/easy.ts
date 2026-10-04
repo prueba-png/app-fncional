@@ -64,9 +64,9 @@ interface EasyState {
   pending: PendingInput | null;
   askFiles(files: File[]): void;
   askUrl(url: string): void;
-  startPending(instruction: string): Promise<void>;
+  startPending(instruction: string, multiPage?: boolean): Promise<void>;
   cancelAsk(): void;
-  cloneUrl(url: string, instruction?: string): Promise<void>;
+  cloneUrl(url: string, instruction?: string, multiPage?: boolean): Promise<void>;
   cloneFiles(files: File[], instruction?: string): Promise<void>;
   /** Plan B cuando la vista no puede enviar imágenes: clona a partir de una descripción escrita */
   cloneFromDescription(description: string): Promise<void>;
@@ -97,10 +97,12 @@ const VISUAL_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|ogv|pdf)$
 const CODE_RE = /\.(html?|css|m?js|json|txt|md|xml|svg)$/i;
 const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
 const MAX_DOC_CHARS = 60_000;
+/** Páginas enlazadas como máximo cuando se pide clonar «toda la web» (menús, formularios…), no solo la principal */
+const MAX_LINKED_PAGES = 5;
 
 let abortController: AbortController | null = null;
 let lastInput:
-  | { kind: "url"; url: string; instruction?: string }
+  | { kind: "url"; url: string; instruction?: string; multiPage?: boolean }
   | { kind: "files"; files: File[]; instruction?: string }
   | { kind: "prompt"; prompt: string; search?: boolean }
   | null = null;
@@ -376,12 +378,12 @@ export const useEasy = create<EasyState>((set, get) => {
       set({ stage: "ask", pending: { kind: "url", url: raw.trim(), label: new URL(url).hostname } });
     },
 
-    async startPending(instruction) {
+    async startPending(instruction, multiPage) {
       const p = get().pending;
       if (!p) return;
       set({ pending: null });
       if (p.kind === "files") await get().cloneFiles(p.files, instruction.trim() || undefined);
-      else await get().cloneUrl(p.url, instruction.trim() || undefined);
+      else await get().cloneUrl(p.url, instruction.trim() || undefined, multiPage);
     },
 
     cancelAsk() {
@@ -434,12 +436,12 @@ export const useEasy = create<EasyState>((set, get) => {
         await db.deleteProjectCascade(prev.id);
         useStudio.setState({ projects: useStudio.getState().projects.filter((p) => p.id !== prev.id) });
       }
-      if (input.kind === "url") await get().cloneUrl(input.url, input.instruction);
+      if (input.kind === "url") await get().cloneUrl(input.url, input.instruction, input.multiPage);
       else if (input.kind === "files") await get().cloneFiles(input.files, input.instruction);
       else await get().createFromPrompt(input.prompt, input.search);
     },
 
-    async cloneUrl(raw, instruction) {
+    async cloneUrl(raw, instruction, multiPage) {
       const url = normalizeUrl(raw);
       if (!url) {
         useStudio.getState().toast("Esa dirección no parece válida. Prueba algo como «ejemplo.com».", "error");
@@ -447,7 +449,7 @@ export const useEasy = create<EasyState>((set, get) => {
       }
       // Se envía tal cual la escribió el usuario: sin protocolo, el servidor prueba HTTPS y luego HTTP
       const typed = raw.trim();
-      lastInput = { kind: "url", url: typed, instruction };
+      lastInput = { kind: "url", url: typed, instruction, multiPage };
       abortController = new AbortController();
       const signal = abortController.signal;
       const host = new URL(url).hostname;
@@ -469,7 +471,9 @@ export const useEasy = create<EasyState>((set, get) => {
         return;
       }
       const download = (o: { url: string; keepScripts: boolean }) =>
-        exact === "server" ? ingest(o, signal) : ingestViaRelay({ ...o, url: /^https?:\/\//i.test(o.url) ? o.url : url });
+        exact === "server"
+          ? ingest({ ...o, multiPage, maxPages: MAX_LINKED_PAGES }, signal)
+          : ingestViaRelay({ ...o, url: /^https?:\/\//i.test(o.url) ? o.url : url, multiPage, maxPages: MAX_LINKED_PAGES });
 
       set({
         stage: "working",
@@ -558,7 +562,7 @@ export const useEasy = create<EasyState>((set, get) => {
         // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
         // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
         // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
-        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador|se quitó.*aviso de cookies|imagen\(es\) no se pudieron descargar/i;
+        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador|se quitó.*aviso de cookies|imagen\(es\) no se pudieron descargar|se clon(ó|aron).*página.*enlazada/i;
         if (refineNote) note = refineNote;
         if (!note) {
           const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));

@@ -9,7 +9,18 @@
  * Solo se usan con páginas públicas: la URL que se clona pasa por el servicio.
  */
 import type { IngestOptions, IngestResult } from "../../shared/types";
-import { ingestWithFetcher, type BinaryFetcher, type FetchedText, type TextFetcher } from "../../shared/ingestCore";
+import { ingestLinkedPages, ingestWithFetcher, type BinaryFetcher, type FetchedText, type TextFetcher } from "../../shared/ingestCore";
+
+/** Si se pidió clonado multi-página, añade las páginas enlazadas al resultado ya obtenido para `opts.url`. */
+async function withLinkedPages(result: IngestResult, opts: IngestOptions): Promise<IngestResult> {
+  if (!opts.multiPage) return result;
+  try {
+    const extra = await ingestLinkedPages(relayFetcher, relayBinary, result, opts);
+    return { ...result, files: { ...result.files, ...extra.files }, warnings: [...result.warnings, ...extra.warnings] };
+  } catch {
+    return result; // el clonado de páginas enlazadas es un añadido: si falla, se devuelve igualmente el clon de la principal
+  }
+}
 
 interface Relay {
   name: string;
@@ -326,7 +337,7 @@ export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult>
     first = await ingestWithFetcher(relayFetcher, { ...opts, budgetMs }, relayBinary);
     if (!first.looksClientRendered) {
       const resolved = await resolveIfGenericShell(opts, first, budgetMs);
-      return resolved ?? first;
+      return withLinkedPages(resolved ?? first, opts);
     }
   } catch (err) {
     firstError = err;
@@ -336,10 +347,13 @@ export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult>
     const rendered = await fetchRendered(opts.url);
     const fetcher: TextFetcher = (u, o) => (u === opts.url ? Promise.resolve(rendered) : relayFetcher(u, o));
     const result = await ingestWithFetcher(fetcher, { ...opts, keepScripts: false, budgetMs }, relayBinary);
-    if (first && result.dom.totalElements < first.dom.totalElements) return first;
-    return { ...result, looksClientRendered: false, warnings: [...result.warnings, "Se copió la página ya pintada por un navegador (la web se genera con JavaScript)."] };
+    if (first && result.dom.totalElements < first.dom.totalElements) return withLinkedPages(first, opts);
+    return withLinkedPages(
+      { ...result, looksClientRendered: false, warnings: [...result.warnings, "Se copió la página ya pintada por un navegador (la web se genera con JavaScript)."] },
+      opts,
+    );
   } catch {
-    if (first) return first;
+    if (first) return withLinkedPages(first, opts);
     throw firstError instanceof Error ? firstError : new Error("No se pudo descargar la web.");
   }
 }

@@ -7,13 +7,17 @@ import { ingestUrl } from "../server/lib/domAnalyzer";
 const PAGE = `<!doctype html><html><head><title>Fixture</title>
 <link rel="stylesheet" href="/css/main.css"><style>.hero{color:#fff}</style>
 <script src="/app.js"></script></head>
-<body onload="evil()"><header><nav><a href="/x">Inicio</a></nav></header>
+<body onload="evil()"><header><nav><a href="/x">Inicio</a> <a href="/acceso">Acceso</a></nav></header>
 <h1>Título</h1><h3>Salto</h3>
 <img src="/img/a.png"><img data-src="/img/lazy.jpg" alt="lazy">
 <form><input type="email" placeholder="Correo"></form>
 <button></button><div class="flex items-center gap-4 bg-slate-900 md:px-6"></div>
 </body></html>`;
 const CSS = `@import "/css/extra.css"; :root{--brand:#6d5dfc} body{font-family:Inter,sans-serif;background:url(../img/bg.png)} @media (min-width: 768px){body{font-size:18px}}`;
+const LOGIN_PAGE = `<!doctype html><html><head><title>Acceso</title></head>
+<body><h1>Inicia sesión</h1><a href="/">Volver</a>
+<form><input type="text" placeholder="Usuario"><input type="password" placeholder="Contraseña"><button>Entrar</button></form>
+</body></html>`;
 
 let server: http.Server;
 let base = "";
@@ -22,6 +26,7 @@ beforeAll(async () => {
   process.env.ALLOW_PRIVATE_URLS = "true";
   server = http.createServer((req, res) => {
     if (req.url === "/") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
+    if (req.url === "/acceso") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(LOGIN_PAGE);
     if (req.url === "/css/main.css") return res.writeHead(200, { "content-type": "text/css" }).end(CSS);
     if (req.url === "/css/extra.css") return res.writeHead(200, { "content-type": "text/css" }).end(".extra{color:rgb(1, 2, 3)}");
     res.writeHead(404).end();
@@ -74,5 +79,24 @@ describe("ingestUrl", () => {
     expect(r.outline.map((o) => o.level)).toEqual([1, 3]);
     expect(r.assets.some((a) => a.url === `${base}/img/bg.png`)).toBe(true);
     expect(r.dependencies.some((d) => d.id === "tailwind")).toBe(true);
+  });
+
+  it("con multiPage, clona también las páginas enlazadas y reescribe los enlaces entre ellas", async () => {
+    const r = await ingestUrl({ url: base + "/", multiPage: true, maxPages: 5 });
+    // La página de acceso enlazada se clona en su propia carpeta, con su propio contenido real
+    expect(r.files["pages/acceso/index.html"]).toContain("Inicia sesión");
+    expect(r.files["pages/acceso/index.html"]).toContain("Usuario");
+    // El enlace a esa página, en la principal, apunta ahora al fichero local (no a la web original)
+    expect(r.files["index.html"]).toContain('href="pages/acceso/index.html"');
+    expect(r.files["index.html"]).not.toContain(`href="${base}/acceso"`);
+    // Y el enlace de vuelta, dentro de la página de acceso, apunta de nuevo a la principal
+    expect(r.files["pages/acceso/index.html"]).toContain('href="index.html"');
+    // Un enlace roto de la web original (/x, 404) no debe romper el clonado: simplemente se omite
+    expect(r.warnings.some((w) => /clon(ó|aron).*página.*enlazada/i.test(w))).toBe(true);
+  });
+
+  it("sin multiPage (por defecto), no clona páginas enlazadas", async () => {
+    const r = await ingestUrl({ url: base + "/" });
+    expect(r.files["pages/acceso/index.html"]).toBeUndefined();
   });
 });

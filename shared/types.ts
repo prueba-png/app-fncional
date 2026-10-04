@@ -88,6 +88,10 @@ export interface IngestOptions {
   inlineStylesheets?: boolean;
   /** Tiempo máximo total en ms (entornos serverless con límite de ejecución) */
   budgetMs?: number;
+  /** Clonar también páginas enlazadas de la misma web (menús, formularios…), no solo esta (por defecto: false) */
+  multiPage?: boolean;
+  /** Máximo de páginas enlazadas adicionales a clonar cuando `multiPage` está activo (por defecto 5) */
+  maxPages?: number;
 }
 
 /** Contenido multimodal que el cliente envía al asistente */

@@ -486,6 +486,7 @@ function AskScreen() {
   const pending = useEasy((s) => s.pending);
   const { startPending, cancelAsk, askFiles } = useEasy.getState();
   const [instruction, setInstruction] = useState("");
+  const [multiPage, setMultiPage] = useState(false);
   const moreRef = useRef<HTMLInputElement>(null);
   if (!pending) return null;
 
@@ -523,6 +524,28 @@ function AskScreen() {
               <span>{i + 1}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {!isFiles && (
+        <div className="precision" style={{ marginBottom: 10 }}>
+          <span className="small muted" id="multipage-label">
+            ¿Cuánto quieres clonar?
+          </span>
+          <div className="seg" role="group" aria-labelledby="multipage-label">
+            <button className={!multiPage ? "active" : ""} aria-pressed={!multiPage} onClick={() => setMultiPage(false)} title="Solo la página que pegaste">
+              Solo esta página
+            </button>
+            <button
+              className={multiPage ? "active" : ""}
+              aria-pressed={multiPage}
+              onClick={() => setMultiPage(true)}
+              title="Clona además hasta 5 páginas enlazadas (acceso, menú, contacto…) para que sus formularios y enlaces funcionen dentro del proyecto"
+            >
+              Toda la web (menús y formularios)
+            </button>
+          </div>
+          {multiPage && <small className="muted">Clona también hasta 5 páginas enlazadas (acceso, menú, contacto…); puede tardar algo más.</small>}
         </div>
       )}
 
@@ -570,7 +593,7 @@ function AskScreen() {
             </button>
           </>
         )}
-        <button className="btn primary" onClick={() => void startPending(instruction)}>
+        <button className="btn primary" onClick={() => void startPending(instruction, !isFiles && multiPage)}>
           <Icon name="bolt" size={14} /> Crear
         </button>
       </div>

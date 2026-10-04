@@ -599,3 +599,115 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
     ...(staticFiles ? { staticFiles } : {}),
   };
 }
+
+const DEFAULT_MAX_LINKED_PAGES = 5;
+
+/** Carpeta del proyecto donde se guarda cada página enlazada clonada (una por página, con sus propios ficheros). */
+function pageSlugFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "");
+    const slug = path
+      .split("/")
+      .filter(Boolean)
+      .join("-")
+      .replace(/[^a-z0-9-_]+/gi, "-")
+      .toLowerCase();
+    return slug || "inicio";
+  } catch {
+    return "pagina";
+  }
+}
+
+/**
+ * Enlaces absolutos a la MISMA web (mismo origen) que aparecen en el HTML ya generado (sus `href` ya
+ * están absolutizados por `ingestWithFetcher`), en el orden en que aparecen y sin repetir, hasta `limit`.
+ */
+function sameOriginLinks(html: string, baseUrl: string, excludeUrl: string, limit: number): string[] {
+  let origin: string;
+  try {
+    origin = new URL(baseUrl).origin;
+  } catch {
+    return [];
+  }
+  const normalize = (u: string) => u.split("#")[0].replace(/\/$/, "");
+  const seen = new Set<string>([normalize(excludeUrl)]);
+  const out: string[] = [];
+  for (const m of html.matchAll(/<a\s+[^>]*href="(https?:\/\/[^"]+)"/gi)) {
+    if (out.length >= limit) break;
+    let u: URL;
+    try {
+      u = new URL(m[1]);
+    } catch {
+      continue;
+    }
+    if (u.origin !== origin) continue;
+    const n = normalize(m[1]);
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Clonado multi-página: a partir del resultado ya generado para `opts.url` (la página principal), clona
+ * además hasta `opts.maxPages` páginas enlazadas de la MISMA web (menús, formularios, secciones internas…)
+ * y las guarda cada una en su propia carpeta del proyecto (`pages/<slug>/index.html` + sus propios
+ * styles.css/script.js/assets). Reescribe los enlaces entre páginas ya clonadas (en todas direcciones)
+ * para que apunten al fichero local, así la vista previa navega entre ellas sin salir a la web real.
+ *
+ * Si una página enlazada concreta no se puede descargar, se omite con un aviso (no rompe el clonado de
+ * las demás ni de la página principal).
+ */
+export async function ingestLinkedPages(
+  fetcher: TextFetcher,
+  fetchBinary: BinaryFetcher | undefined,
+  main: IngestResult,
+  opts: IngestOptions,
+): Promise<{ files: FileMap; warnings: string[] }> {
+  const maxPages = Math.max(0, Math.min(opts.maxPages ?? DEFAULT_MAX_LINKED_PAGES, 10));
+  const warnings: string[] = [];
+  const mainHtml = main.files["index.html"];
+  if (!maxPages || !mainHtml) return { files: {}, warnings };
+
+  const links = sameOriginLinks(mainHtml, main.finalUrl, main.finalUrl, maxPages);
+  if (!links.length) return { files: {}, warnings };
+
+  const usedFolders = new Set<string>();
+  // URL normalizada -> ruta local ("index.html" o "pages/slug/index.html"); incluye la propia página
+  // principal, para que los enlaces DE VUELTA (desde una página clonada hacia la principal) también
+  // se reescriban en vez de salir a la web real.
+  const localFor = new Map<string, string>([[main.finalUrl.split("#")[0].replace(/\/$/, ""), "index.html"]]);
+  const extraFiles: FileMap = {};
+  const perPageBudget = Math.max(8_000, Math.min(20_000, Math.round((opts.budgetMs ?? 60_000) / 2)));
+  let cloned = 0;
+
+  for (const link of links) {
+    let slug = pageSlugFromUrl(link);
+    let folder = `pages/${slug}`;
+    for (let i = 2; usedFolders.has(folder); i++) folder = `pages/${slug}-${i}`;
+    try {
+      const sub = await ingestWithFetcher(fetcher, { ...opts, url: link, keepScripts: false, multiPage: false, budgetMs: perPageBudget }, fetchBinary);
+      usedFolders.add(folder);
+      localFor.set(link.split("#")[0].replace(/\/$/, ""), `${folder}/index.html`);
+      for (const [path, content] of Object.entries(sub.files)) extraFiles[`${folder}/${path}`] = content;
+      cloned++;
+    } catch {
+      warnings.push(`No se pudo clonar la página enlazada ${link}; se omite.`);
+    }
+  }
+  if (!cloned) return { files: {}, warnings };
+  warnings.push(`Se ${cloned === 1 ? "clonó 1 página enlazada" : `clonaron ${cloned} páginas enlazadas`} además de la principal.`);
+
+  // En TODAS las páginas (principal + las nuevas), los enlaces que apunten a una página ya clonada se
+  // reescriben a su fichero local: así se abren dentro del propio proyecto en vez de salir a la web real.
+  const rewriteLinks = (html: string): string =>
+    html.replace(/(<a\s+[^>]*href=")(https?:\/\/[^"]+)(")/gi, (m, pre: string, href: string, post: string) => {
+      const local = localFor.get(href.split("#")[0].replace(/\/$/, ""));
+      return local ? `${pre}${local}${post}` : m;
+    });
+
+  const files: FileMap = { "index.html": rewriteLinks(mainHtml) };
+  for (const [path, content] of Object.entries(extraFiles)) files[path] = path.endsWith("/index.html") ? rewriteLinks(content) : content;
+  return { files, warnings };
+}
