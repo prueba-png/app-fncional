@@ -28,6 +28,26 @@ describe("parseFileBlocks", () => {
   it("resume los bloques para el historial", () => {
     expect(summarizeFileBlocks(`Ok\n<file path="a.css">x</file>`)).toBe("Ok\n[fichero actualizado: a.css]");
   });
+
+  it("acepta comillas simples (algunos modelos gratuitos las usan en vez de dobles)", () => {
+    const text = `Cambio el título.\n<file path='index.html'>\n<h1>Nuevo título</h1>\n</file>\n<delete path='old.js' />`;
+    const r = parseFileBlocks(text);
+    expect(r.updated).toEqual({ "index.html": "<h1>Nuevo título</h1>" });
+    expect(r.deleted).toEqual(["old.js"]);
+    expect(r.prose).toBe("Cambio el título.");
+    expect(r.incomplete).toBe(false);
+  });
+
+  it("detecta también un bloque truncado con comillas simples", () => {
+    const r = parseFileBlocks(`Explicación\n<file path='a.css'>\nbody { color: red;`);
+    expect(r.updated).toEqual({});
+    expect(r.incomplete).toBe(true);
+    expect(r.prose).toBe("Explicación");
+  });
+
+  it("resume también los bloques con comillas simples", () => {
+    expect(summarizeFileBlocks(`Ok\n<file path='a.css'>x</file>`)).toBe("Ok\n[fichero actualizado: a.css]");
+  });
 });
 
 describe("omitLargeDataUris / restoreDataUris", () => {

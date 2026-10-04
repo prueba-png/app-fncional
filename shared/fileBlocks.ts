@@ -19,8 +19,11 @@ export interface ParsedFileChanges {
   incomplete: boolean;
 }
 
-const FILE_RE = /<file\s+path="([^"]+)"\s*>\r?\n?([\s\S]*?)\r?\n?<\/file>/g;
-const DELETE_RE = /<delete\s+path="([^"]+)"\s*\/>/g;
+// Comillas simples o dobles: algunos modelos (sobre todo los gratuitos) devuelven <file path='...'>
+// en vez de con comillas dobles; sin aceptar las dos, ese bloque entero se trataba como texto normal
+// y el cambio no se aplicaba, aunque el modelo sí hubiera escrito el código.
+const FILE_RE = /<file\s+path=(?:"([^"]+)"|'([^']+)')\s*>\r?\n?([\s\S]*?)\r?\n?<\/file>/g;
+const DELETE_RE = /<delete\s+path=(?:"([^"]+)"|'([^']+)')\s*\/>/g;
 
 export function sanitizePath(path: string): string | null {
   const clean = path.trim().replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
@@ -40,15 +43,15 @@ export function parseFileBlocks(text: string): ParsedFileChanges {
   const updated: FileMap = {};
   const deleted: string[] = [];
   for (const m of text.matchAll(FILE_RE)) {
-    const p = sanitizePath(m[1]);
-    if (p) updated[p] = stripFence(m[2]);
+    const p = sanitizePath(m[1] ?? m[2]);
+    if (p) updated[p] = stripFence(m[3]);
   }
   for (const m of text.matchAll(DELETE_RE)) {
-    const p = sanitizePath(m[1]);
+    const p = sanitizePath(m[1] ?? m[2]);
     if (p) deleted.push(p);
   }
   const withoutClosed = text.replace(FILE_RE, "").replace(DELETE_RE, "");
-  const openIdx = withoutClosed.search(/<file\s+path="/);
+  const openIdx = withoutClosed.search(/<file\s+path=["']/);
   const incomplete = openIdx !== -1;
   const prose = (incomplete ? withoutClosed.slice(0, openIdx) : withoutClosed).replace(/\n{3,}/g, "\n\n").trim();
   return { updated, deleted, prose, incomplete };
@@ -57,9 +60,9 @@ export function parseFileBlocks(text: string): ParsedFileChanges {
 /** Sustituye los bloques de ficheros por marcadores legibles (para el historial del chat). */
 export function summarizeFileBlocks(text: string): string {
   return text
-    .replace(FILE_RE, (_m, p: string) => `[fichero actualizado: ${p}]`)
-    .replace(DELETE_RE, (_m, p: string) => `[fichero eliminado: ${p}]`)
-    .replace(/<file\s+path="([^"]+)"[\s\S]*$/, (_m, p: string) => `[fichero en curso: ${p}]`)
+    .replace(FILE_RE, (_m, p1: string, p2: string) => `[fichero actualizado: ${p1 ?? p2}]`)
+    .replace(DELETE_RE, (_m, p1: string, p2: string) => `[fichero eliminado: ${p1 ?? p2}]`)
+    .replace(/<file\s+path=(?:"([^"]+)"|'([^']+)')[\s\S]*$/, (_m, p1: string, p2: string) => `[fichero en curso: ${p1 ?? p2}]`)
     .trim();
 }
 
