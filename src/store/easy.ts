@@ -91,6 +91,8 @@ function readPrecision(): Precision {
 }
 /** Texto típico del aviso que muestran las webs cuando JavaScript no se ejecuta (en varios idiomas). */
 export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|please\s+enable)\s+javascript\b|\bjavascript\s+(is\s+)?(disabled|desactivad[oa]|requer[ei]d?o|necesari[oa])\b|\bneed(s|a)?\s+javascript\b/i;
+/** Una URL mencionada dentro del texto libre de "Crear algo nuevo desde cero" (p. ej. «clóname tal-sitio.com»). */
+export const TEXT_URL_RE = /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?/i;
 const VISUAL_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|ogv|pdf)$/i;
 const CODE_RE = /\.(html?|css|m?js|json|txt|md|xml|svg)$/i;
 const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;
@@ -868,6 +870,12 @@ Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiem
         });
         return;
       }
+      // Si el texto menciona una URL (p. ej. «clóname tal-sitio.com, quiero que sea exacto»), hace falta
+      // visitarla de verdad (web_fetch/url_context) para copiar su diseño real. "Buscar en internet"
+      // (search) es la herramienta de búsqueda de Google (resultados y resúmenes), que NUNCA basta para
+      // esto: sin visitar la página, la IA solo puede aproximar colores, logos y medidas de memoria o por
+      // lo que diga un resumen, y el resultado sale "parecido" en vez de igual.
+      const mentionsUrl = TEXT_URL_RE.test(text);
       try {
         await studio.createProject({
           name: title.replace(/[.!?]+$/, "").slice(0, 60) || "Proyecto nuevo",
@@ -877,15 +885,18 @@ Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiem
         await runAi(
           `Crea EXACTAMENTE lo que te pide el usuario, ni más ni menos, sin añadir secciones o funciones que no haya pedido:
 ${text}
-${search ? "\n- Antes de construir, BUSCA en internet la información real que necesites (datos, precios, nombres, hechos actuales) y úsala; no te la inventes.\n" : ""}
-- Interpreta la petición de forma literal: si detalla textos, colores, secciones o un orden concreto, respétalo tal cual.
+${search ? "\n- Antes de construir, BUSCA en internet la información real que necesites (datos, precios, nombres, hechos actuales) y úsala; no te la inventes.\n" : ""}${
+            mentionsUrl
+              ? `\n- El texto menciona una dirección web: usa la herramienta web_fetch/url_context para VISITARLA de verdad y copiar su diseño REAL (no una aproximación ni "algo parecido"): mismos colores exactos (en hex, muestreados de su CSS real), misma tipografía, mismo logotipo (recórtalo o enlázalo tal cual, nunca lo sustituyas por un bloque de color o un icono genérico), mismas alturas, márgenes y espaciados entre secciones, mismo orden y estructura. Si de verdad no puedes visitarla (sin esa herramienta disponible), dilo explícitamente en la explicación en vez de inventarte un resultado "similar" y presentarlo como si fuera el real.\n`
+              : ""
+          }- Interpreta la petición de forma literal: si detalla textos, colores, secciones o un orden concreto, respétalo tal cual.
 - Si algo queda ambiguo, elige la interpretación más razonable y dilo en una frase, pero no inventes funciones extra no pedidas.
 - Crea una página completa y funcional: index.html, styles.css y script.js, con HTML semántico y accesible.
 - Responsive de verdad: con @media que reorganicen la maquetación (columnas que se apilan, menú hamburguesa) en pantallas estrechas, y sin anchos fijos en los contenedores principales; pruébalo mentalmente tanto en escritorio como en móvil antes de darlo por terminado.
 - Usa contenido de ejemplo realista donde el usuario no haya dado datos concretos.`,
           [],
           [],
-          { mode: "edit", webSearch: search },
+          { mode: "edit", webSearch: search, webFetch: mentionsUrl || undefined },
         );
       } catch (err) {
         fail(friendlyAiError((err as Error).message));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as cheerio from "cheerio";
-import { normalizeUrl, NOSCRIPT_RE } from "../src/store/easy";
+import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE } from "../src/store/easy";
 import { detectClientRendered } from "../server/lib/domAnalyzer";
 
 describe("normalizeUrl", () => {
@@ -25,6 +25,14 @@ describe("NOSCRIPT_RE (aviso de 'activa JavaScript')", () => {
   it("no se activa con contenido real que no menciona JavaScript", () => {
     expect(NOSCRIPT_RE.test("Bienvenido a nuestra tienda online. Envíos gratis a partir de 30€.")).toBe(false);
     expect(NOSCRIPT_RE.test("Aprende JavaScript con nuestro curso online, totalmente gratis.")).toBe(false);
+  });
+});
+
+describe("TEXT_URL_RE (URL mencionada en 'Crear algo nuevo desde cero')", () => {
+  it("detecta una URL con o sin protocolo dentro del texto libre", () => {
+    expect(TEXT_URL_RE.test("Clóname https://ejemplo.com, quiero que sea exacto")).toBe(true);
+    expect(TEXT_URL_RE.test("clona www.ejemplo.com tal cual")).toBe(true);
+    expect(TEXT_URL_RE.test("Una landing para una cafetería, en tonos cálidos")).toBe(false);
   });
 });
 
