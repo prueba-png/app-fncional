@@ -714,6 +714,12 @@ function ResultScreen() {
   const lastVersionIdx = lastAi?.meta?.versionId ? versions.findIndex((v) => v.id === lastAi.meta!.versionId) : -1;
   const undoTarget = lastVersionIdx >= 0 ? versions[lastVersionIdx + 1] : undefined;
 
+  // Si el proyecto viene de clonar una URL real, los cambios también pueden necesitar consultarla de nuevo
+  // (p. ej. «añade el mismo formulario de contacto que tiene la web»): se activa la herramienta de
+  // navegación aunque el usuario no vuelva a escribir la URL en su petición de cambio.
+  const originIsUrl = project.origin?.type === "url" && /^https?:\/\//i.test(project.origin.detail ?? "");
+  const needsWebFetch = (text: string) => originIsUrl || TEXT_URL_RE.test(text);
+
   const addImages = (files: File[]) => {
     const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(f.name));
     if (imgs.length) setExtraImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_REQUEST));
@@ -755,7 +761,7 @@ function ResultScreen() {
           attachments,
           attachmentLabels: labels,
           mode: "generate-from-reference",
-          webFetch: TEXT_URL_RE.test(text),
+          webFetch: needsWebFetch(text),
         });
       } catch (err) {
         toast((err as Error).message, "error");
@@ -765,7 +771,7 @@ function ResultScreen() {
       return;
     }
     setChange("");
-    void useChat.getState().send(text, TEXT_URL_RE.test(text) ? { webFetch: true } : undefined);
+    void useChat.getState().send(text, needsWebFetch(text) ? { webFetch: true } : undefined);
   };
 
   /**
@@ -776,7 +782,7 @@ function ResultScreen() {
   const resendLastUser = async (mode: "continue" | "retry") => {
     if (!lastUserPrompt) return;
     const text = mode === "continue" ? resumePrompt(lastUserPrompt) : lastUserPrompt;
-    const webFetch = TEXT_URL_RE.test(text);
+    const webFetch = needsWebFetch(text);
     if (!lastHadAttachments) {
       void useChat.getState().send(text, webFetch ? { webFetch: true } : undefined);
       return;

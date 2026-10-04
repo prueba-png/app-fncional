@@ -164,6 +164,19 @@ export const useChat = create<ChatState>((set, get) => ({
         /* sin referencias guardadas */
       }
     }
+    // El proyecto es un clon de una URL real: si este cambio puede usar la herramienta de navegación,
+    // se recuerda cuál es esa URL para que la IA la visite de nuevo en vez de inventar los datos nuevos
+    // que añada (el usuario espera que coincidan con la página oficial, no una aproximación).
+    if (opts.webFetch && project.origin?.type === "url" && project.origin.detail) {
+      attachments = [
+        ...(attachments ?? []),
+        {
+          type: "text",
+          text: `Este proyecto es un clon de la web real ${project.origin.detail}. Si este cambio necesita algún dato de esa página (texto, estructura, un elemento que falte, un valor exacto) visita esa URL con tu herramienta de navegación y úsalo tal cual, en vez de inventarlo o aproximarlo.`,
+          label: "Web original del proyecto",
+        },
+      ];
+    }
 
     const userMsg: ChatMessage = {
       id: uid("m_"),

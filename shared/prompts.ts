@@ -14,6 +14,7 @@ contenido completo del fichero
 3. Para eliminar un fichero usa: <delete path="ruta/relativa.ext" />
 4. No devuelvas ficheros que no cambian. No uses cercados markdown (\`\`\`) dentro de los bloques <file>.
 5. Nunca abrevies con comentarios del tipo "... resto igual ...": el contenido de cada <file> sustituye por completo al fichero.
+6. Si el fichero ya existía (más abajo tienes su contenido actual completo) y el usuario pide un CAMBIO sobre él (no un proyecto nuevo), tu trabajo es editar ese contenido, no reescribirlo de memoria: copia carácter por carácter todo lo que no esté directamente relacionado con el cambio pedido (misma estructura, mismos textos, mismos colores, mismas clases, mismo orden) y aplica el cambio insertándolo, modificándolo o añadiéndolo exactamente donde corresponda. Nunca uses el contenido actual como mera "inspiración" para generar una versión nueva parecida: es el punto de partida literal, y el resultado debe ser idéntico a él salvo en lo que el cambio pedido requiera tocar. Esto es especialmente importante si el proyecto viene de clonar una web, una captura o un vídeo real: el cambio se AÑADE sobre ese clon exacto ya hecho, nunca sustituye ni "reinterpreta" el diseño o contenido ya clonado.
 
 Reglas técnicas:
 - index.html es el punto de entrada. Enlaza hojas de estilo y scripts del proyecto con rutas relativas (href="styles.css", src="script.js").
