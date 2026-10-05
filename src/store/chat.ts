@@ -11,7 +11,7 @@ import { streamDirect } from "../lib/directAi";
 import { streamGemini, streamOpenRouter } from "../lib/freeAi";
 import { uid } from "../lib/util";
 import { aiAvailable, useStudio } from "./studio";
-import { FILE_CHAR_BUDGET_ANTHROPIC, FILE_CHAR_BUDGET_GEMINI, FILE_CHAR_BUDGET_OPENROUTER, filesContextChars } from "../../shared/prompts";
+import { FILE_CHAR_BUDGET_ANTHROPIC, FILE_CHAR_BUDGET_GEMINI, FILE_CHAR_BUDGET_OPENROUTER, filesContextChars, trimLinkedPagesForBudget } from "../../shared/prompts";
 
 const HISTORY_TURNS = 12;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -215,7 +215,13 @@ export const useChat = create<ChatState>((set, get) => ({
     // cientos de miles de caracteres sin que la IA necesite verlas para un cambio de texto o color: se
     // omiten del envío (y se reponen después si el fichero vuelve sin tocar esa parte), para no superar el
     // límite de tamaño de la petición por datos que la IA ni necesitaba leer.
-    const { files: contextFiles, restore: dataUriRestore } = omitLargeDataUris(useStudio.getState().project!.files);
+    const { files: omittedFiles, restore: dataUriRestore } = omitLargeDataUris(useStudio.getState().project!.files);
+    // Un proyecto con varias páginas clonadas (clonado multi-página) puede superar el presupuesto de
+    // cualquier proveedor aunque el cambio pedido no tenga nada que ver con esas páginas adicionales: si
+    // no cabe en ninguno, se omite el código de las páginas que el propio texto no menciona por su nombre,
+    // en vez de fallar siempre con "el proyecto supera X caracteres".
+    const bestBudget = Math.max(0, ...buildProviderAttempts(studio).map((a) => a.charBudget));
+    const contextFiles = trimLinkedPagesForBudget(omittedFiles, prompt, bestBudget);
     const requiredChars = filesContextChars(contextFiles);
 
     try {

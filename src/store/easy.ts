@@ -93,6 +93,11 @@ function readPrecision(): Precision {
 export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|please\s+enable)\s+javascript\b|\bjavascript\s+(is\s+)?(disabled|desactivad[oa]|requer[ei]d?o|necesari[oa])\b|\bneed(s|a)?\s+javascript\b/i;
 /** Una URL mencionada dentro del texto libre de "Crear algo nuevo desde cero" (p. ej. «clóname tal-sitio.com»). */
 export const TEXT_URL_RE = /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?/i;
+/** El usuario pide clonar varias páginas enlazadas (no solo la principal) escribiéndolo en texto libre,
+ * en vez de (o además de) pulsar el botón «Toda la web»: p. ej. «clona hasta cinco páginas», «con su
+ * menú y su acceso», «todas las páginas». Los números se aceptan en dígitos o en palabra (uno…diez). */
+export const MULTIPAGE_TEXT_RE =
+  /(?:\d+|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+p[aá]ginas?\b|todas\s+las\s+p[aá]ginas|p[aá]ginas\s+enlazadas|(?:men[uú]|acceso|formularios?).{0,20}\b(?:y|con)\b.{0,20}(?:men[uú]|acceso|formularios?)/i;
 const VISUAL_RE = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|ogv|pdf)$/i;
 const CODE_RE = /\.(html?|css|m?js|json|txt|md|xml|svg)$/i;
 const DOC_RE = /\.(txt|md|markdown|csv|json|xml)$/i;

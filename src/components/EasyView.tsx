@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { parseFileBlocks } from "../../shared/fileBlocks";
-import { useEasy, normalizeUrl } from "../store/easy";
+import { useEasy, normalizeUrl, MULTIPAGE_TEXT_RE } from "../store/easy";
 import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
 import { useChat, improveIdea } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
@@ -557,7 +557,12 @@ function AskScreen() {
             : "Ej.: clónala tal cual · instala solo el formulario de contacto · instala solo la sección de precios"
         }
         value={instruction}
-        onChange={(e) => setInstruction(e.target.value)}
+        onChange={(e) => {
+          setInstruction(e.target.value);
+          // Si lo pide por texto («clona hasta cinco páginas», «con su menú y su acceso»…), se marca el
+          // botón solo: no hace falta que además recuerde pulsarlo para que la app lo haga de verdad.
+          if (!isFiles && MULTIPAGE_TEXT_RE.test(e.target.value)) setMultiPage(true);
+        }}
         autoFocus
         aria-label="Qué quieres que haga la IA"
       />
@@ -593,7 +598,7 @@ function AskScreen() {
             </button>
           </>
         )}
-        <button className="btn primary" onClick={() => void startPending(instruction, !isFiles && multiPage)}>
+        <button className="btn primary" onClick={() => void startPending(instruction, !isFiles && (multiPage || MULTIPAGE_TEXT_RE.test(instruction)))}>
           <Icon name="bolt" size={14} /> Crear
         </button>
       </div>

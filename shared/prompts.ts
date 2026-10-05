@@ -87,6 +87,37 @@ export function filesContextChars(files: Record<string, string>): number {
   return total;
 }
 
+/**
+ * Un proyecto con varias páginas clonadas (clonado multi-página: `pages/<slug>/…`) puede superar el
+ * presupuesto de caracteres de cualquier proveedor sin que el cambio pedido tenga nada que ver con esas
+ * páginas adicionales (p. ej. «cambia el color del botón» en la principal). En vez de fallar siempre que
+ * el proyecto es grande, se omite el contenido de las páginas enlazadas que el propio texto del usuario no
+ * menciona por su nombre (se deja un marcador corto en su lugar), y solo si eso es necesario para caber en
+ * `maxChars`. Si el usuario sí menciona una página («en la página de acceso, cambia…»), esa se conserva
+ * completa. Los ficheros de la página principal (fuera de `pages/`) nunca se recortan.
+ */
+export function trimLinkedPagesForBudget(files: Record<string, string>, prompt: string, maxChars: number): Record<string, string> {
+  if (filesContextChars(files) <= maxChars) return files;
+  const promptLower = (prompt ?? "").toLowerCase();
+  const keepSlugs = new Set<string>();
+  for (const path of Object.keys(files)) {
+    const m = path.match(/^pages\/([^/]+)\//);
+    if (m && promptLower.includes(m[1].replace(/-/g, " "))) keepSlugs.add(m[1]);
+  }
+  const out: Record<string, string> = {};
+  for (const [path, content] of Object.entries(files)) {
+    const m = path.match(/^pages\/([^/]+)\/(.+)$/);
+    if (!m || keepSlugs.has(m[1])) {
+      out[path] = content;
+    } else if (m[2] === "index.html") {
+      // Un marcador corto por página omitida (no su CSS/JS/imágenes): así la IA sabe que existe sin gastar
+      // presupuesto en su contenido completo, y el usuario puede nombrarla para que sí se incluya entera.
+      out[path] = `<!-- Página clonada "${m[1]}" (no mencionada en esta petición): se omite su código para no superar el límite de la IA. Para editarla, nómbrala en tu petición (p. ej. "en la página ${m[1].replace(/-/g, " ")}, …"). -->`;
+    }
+  }
+  return out;
+}
+
 /** Contexto con los ficheros actuales del proyecto. Lanza un error si supera `maxChars`. */
 export function buildFilesContext(files: Record<string, string>, activeFile: string | undefined, maxChars: number): string {
   const entries = Object.entries(files ?? {});

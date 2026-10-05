@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as cheerio from "cheerio";
-import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE } from "../src/store/easy";
+import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE, MULTIPAGE_TEXT_RE } from "../src/store/easy";
 import { detectClientRendered } from "../server/lib/domAnalyzer";
 
 describe("normalizeUrl", () => {
@@ -33,6 +33,25 @@ describe("TEXT_URL_RE (URL mencionada en 'Crear algo nuevo desde cero')", () => 
     expect(TEXT_URL_RE.test("Clóname https://ejemplo.com, quiero que sea exacto")).toBe(true);
     expect(TEXT_URL_RE.test("clona www.ejemplo.com tal cual")).toBe(true);
     expect(TEXT_URL_RE.test("Una landing para una cafetería, en tonos cálidos")).toBe(false);
+  });
+});
+
+describe("MULTIPAGE_TEXT_RE (pide clonar varias páginas enlazadas en texto libre)", () => {
+  it("detecta el número de páginas en dígitos o en palabra", () => {
+    expect(MULTIPAGE_TEXT_RE.test("clona hasta cinco páginas de esa web")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("clona 5 páginas enlazadas")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("clona tres páginas más")).toBe(true);
+  });
+
+  it("detecta «todas las páginas» y la mención conjunta de menú+acceso/formulario", () => {
+    expect(MULTIPAGE_TEXT_RE.test("clónala con todas las páginas")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("quiero el menú y el acceso también")).toBe(true);
+  });
+
+  it("no se activa con una instrucción normal de una sola página", () => {
+    expect(MULTIPAGE_TEXT_RE.test("Clónala tal cual, toda la página")).toBe(false);
+    expect(MULTIPAGE_TEXT_RE.test("Instala solo el formulario de contacto")).toBe(false);
+    expect(MULTIPAGE_TEXT_RE.test("cambia los colores a tonos azules")).toBe(false);
   });
 });
 
