@@ -489,13 +489,17 @@ export const useEasy = create<EasyState>((set, get) => {
         },
       });
 
+      // Fase 1: descarga y procesa la página (y sus páginas enlazadas, si se pidió). Si esto falla y no hay
+      // servidor propio, se cae al plan B de más abajo (la IA visita la web y la reconstruye).
+      let result: Awaited<ReturnType<typeof download>> | undefined;
+      let files: FileMap | undefined;
+      let note: string | undefined;
       try {
         // Precisión máxima: se conservan los scripts originales (menús, carruseles, animaciones y webs hechas con JavaScript)
         const keepScripts = get().precision === "exact";
-        let result = await download({ url: typed, keepScripts });
+        result = await download({ url: typed, keepScripts });
         if (signal.aborted) return;
         advance(1);
-        let note: string | undefined;
         if (result.looksClientRendered && !keepScripts) {
           setSteps((steps) => [
             ...steps.slice(0, 2),
@@ -505,7 +509,7 @@ export const useEasy = create<EasyState>((set, get) => {
           result = await download({ url: result.finalUrl, keepScripts: true });
           if (signal.aborted) return;
         }
-        let files = result.files;
+        files = result.files;
         if (result.staticFiles) {
           // ¿Funcionan los scripts de la web fuera de ella? Se abren las dos versiones y se elige la que muestra la página completa
           setSteps((steps) => steps.map((st, i) => (i === 1 ? { ...st, label: "Comprobando que el clon se ve igual que la web" } : st)));
@@ -529,60 +533,6 @@ export const useEasy = create<EasyState>((set, get) => {
           note =
             "Esta web se genera con JavaScript, así que el clon conserva sus scripts. Algunas partes (inicio de sesión, datos en vivo) pueden no funcionar fuera de la web original.";
         advance(result.looksClientRendered && !keepScripts ? 3 : 2);
-        const { files: _all, staticFiles: _static, ...report } = result;
-        await useStudio.getState().createProject({
-          name: result.title ? result.title.slice(0, 60) : host,
-          files,
-          origin: { type: "url", detail: result.finalUrl },
-          ingest: report,
-          message: `Clon de ${result.finalUrl}`,
-          source: "ingest",
-        });
-        // Un clon exacto no debe recibir librerías añadidas automáticamente (cambiarían su aspecto)
-        useStudio.getState().setAutoInjectDeps(false);
-        // Cuando la web se generaba con JavaScript, lo que se guardó es una foto fija de cómo la pintó un
-        // navegador (sin sus scripts): se compara con una captura real de la web viva y se corrigen
-        // diferencias, igual que ya se hace con las capturas subidas a mano, para no quedarse solo con la
-        // aproximación. Funciona con cualquier IA configurada (gratuita u de pago), no hace falta nada especial.
-        const paintedSnapshot = result.warnings.some((w) => w.includes("ya pintada por un navegador"));
-        let refineNote: string | undefined;
-        if (paintedSnapshot && keepScripts && aiAvailable(useStudio.getState())) {
-          try {
-            const shot = await fetchSiteScreenshot(result.finalUrl);
-            if (shot && get().stage === "working") {
-              const blob = await (await fetch(shot.dataUrl)).blob();
-              const ref = await processReferenceFile(new File([blob], `${host}.jpg`, { type: blob.type || "image/jpeg" }), useStudio.getState().project!.id);
-              await db.saveReference(ref);
-              refineNote = await refineAgainst(ref, 2);
-            }
-          } catch {
-            /* si la captura real o el afinado fallan, se deja el clon tal cual (ya es fiel al HTML pintado) */
-          }
-        }
-        // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
-        // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
-        // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
-        const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador|se quitó.*aviso de cookies|imagen\(es\) no se pudieron descargar|se clon(ó|aron).*página.*enlazada/i;
-        if (refineNote) note = refineNote;
-        if (!note) {
-          const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));
-          if (serious.length) note = `Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto: ${serious[0]}`;
-          else if (result.warnings.length) note = paintedSnapshot ? "Esta web se genera con JavaScript; se comparó el clon con la web real para corregir diferencias." : result.warnings[0];
-        }
-        abortController = null;
-        // Si diste una instrucción («júntalo con…», «cambia…», «instala solo el formulario de contacto»),
-        // se aplica sobre el clon descargado. Se deja claro que el código ya descargado es el real de la
-        // web (no hay que inventarlo) y que si la instrucción pide una parte concreta, hay que quedarse
-        // solo con esa parte y quitar el resto, no limitarse a resaltarla o añadirla a la página completa.
-        if (instruction && aiAvailable(useStudio.getState())) {
-          finish(note);
-          await useChat.getState().send(
-            `El proyecto ya contiene el código real descargado de ${result.finalUrl} (no lo inventes ni lo reconstruyas de memoria: está en los ficheros del proyecto). Ahora aplica esta instrucción del usuario: "${instruction}". Si pide una parte concreta de la página (un formulario, una sección, un menú…), identifica ese fragmento exacto en el código descargado y deja el proyecto SOLO con esa parte (quita el resto), no te limites a señalarla o a añadir algo nuevo junto a la página completa.`,
-          );
-          return;
-        }
-        finish(note);
-        return;
       } catch (err) {
         if ((err as Error).name === "AbortError" || signal.aborted) return;
         if (exact === "server") {
@@ -590,7 +540,79 @@ export const useEasy = create<EasyState>((set, get) => {
           fail(friendlyUrlError((err as Error).message));
           return;
         }
-        // Sin servidor y sin servicio de reenvío disponible: la IA lee la web y la reconstruye
+        result = undefined; // cae al plan B (la IA reconstruye la web) más abajo
+      }
+
+      // Fase 2: guarda el proyecto ya descargado. A partir de aquí NUNCA se cae en silencio al plan B (ya
+      // habría un proyecto a medias): cualquier fallo se muestra como un error real, para no dejar al
+      // usuario sin ninguna explicación de qué pasó.
+      if (result && files) {
+        try {
+          const { files: _all, staticFiles: _static, ...report } = result;
+          await useStudio.getState().createProject({
+            name: result.title ? result.title.slice(0, 60) : host,
+            files,
+            origin: { type: "url", detail: result.finalUrl },
+            ingest: report,
+            message: `Clon de ${result.finalUrl}`,
+            source: "ingest",
+          });
+          // Un clon exacto no debe recibir librerías añadidas automáticamente (cambiarían su aspecto)
+          useStudio.getState().setAutoInjectDeps(false);
+          // Cuando la web se generaba con JavaScript, lo que se guardó es una foto fija de cómo la pintó un
+          // navegador (sin sus scripts): se compara con una captura real de la web viva y se corrigen
+          // diferencias, igual que ya se hace con las capturas subidas a mano, para no quedarse solo con la
+          // aproximación. Funciona con cualquier IA configurada (gratuita u de pago), no hace falta nada especial.
+          const paintedSnapshot = result.warnings.some((w) => w.includes("ya pintada por un navegador"));
+          let refineNote: string | undefined;
+          if (paintedSnapshot && get().precision === "exact" && aiAvailable(useStudio.getState())) {
+            try {
+              const shot = await fetchSiteScreenshot(result.finalUrl);
+              if (shot && get().stage === "working") {
+                const blob = await (await fetch(shot.dataUrl)).blob();
+                const ref = await processReferenceFile(new File([blob], `${host}.jpg`, { type: blob.type || "image/jpeg" }), useStudio.getState().project!.id);
+                await db.saveReference(ref);
+                refineNote = await refineAgainst(ref, 2);
+              }
+            } catch {
+              /* si la captura real o el afinado fallan, se deja el clon tal cual (ya es fiel al HTML pintado) */
+            }
+          }
+          // Algunos avisos son menores y ya tienen su propio respaldo (p. ej. una fuente no copiada usa una
+          // parecida; una hoja de estilos se enlaza directamente al original): no merecen la alarma genérica
+          // de "incompleto". Solo se avisa así cuando el aviso es de verdad grave (la propia página falló, …).
+          const MINOR_WARNING_RE = /fuente\(s\) no se pudieron copiar|se cargan directamente desde la web original|tipo de contenido inesperado|ya pintada por un navegador|se quitó.*aviso de cookies|imagen\(es\) no se pudieron descargar|se clon(ó|aron).*página.*enlazada/i;
+          if (refineNote) note = refineNote;
+          if (!note) {
+            const serious = result.warnings.filter((w) => !MINOR_WARNING_RE.test(w));
+            if (serious.length) note = `Algunos recursos no se pudieron descargar, por lo que el clon puede verse incompleto: ${serious[0]}`;
+            else if (result.warnings.length) note = paintedSnapshot ? "Esta web se genera con JavaScript; se comparó el clon con la web real para corregir diferencias." : result.warnings[0];
+          }
+          abortController = null;
+          // Si diste una instrucción («júntalo con…», «cambia…», «instala solo el formulario de contacto»),
+          // se aplica sobre el clon descargado. Se deja claro que el código ya descargado es el real de la
+          // web (no hay que inventarlo) y que si la instrucción pide una parte concreta, hay que quedarse
+          // solo con esa parte y quitar el resto, no limitarse a resaltarla o añadirla a la página completa.
+          if (instruction && aiAvailable(useStudio.getState())) {
+            finish(note);
+            await useChat.getState().send(
+              `El proyecto ya contiene el código real descargado de ${result.finalUrl} (no lo inventes ni lo reconstruyas de memoria: está en los ficheros del proyecto). Ahora aplica esta instrucción del usuario: "${instruction}". Si pide una parte concreta de la página (un formulario, una sección, un menú…), identifica ese fragmento exacto en el código descargado y deja el proyecto SOLO con esa parte (quita el resto), no te limites a señalarla o a añadir algo nuevo junto a la página completa.`,
+            );
+            return;
+          }
+          finish(note);
+          return;
+        } catch (err) {
+          if ((err as Error).name === "AbortError" || signal.aborted) return;
+          abortController = null;
+          const isQuota = (err as Error).name === "QuotaExceededError" || /quota/i.test((err as Error).message ?? "");
+          fail(
+            isQuota
+              ? "El clon es demasiado grande para guardarlo en este dispositivo (sobre todo con «Toda la web»: varias páginas con sus imágenes ocupan mucho). Prueba con «Solo esta página», o libera espacio en el navegador."
+              : `El clon se descargó pero no se pudo terminar de preparar: ${(err as Error).message}`,
+          );
+          return;
+        }
       }
       abortController = null;
 
