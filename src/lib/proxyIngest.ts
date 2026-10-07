@@ -1,0 +1,376 @@
+/**
+ * Clonado exacto sin servidor propio: el navegador no puede descargar otras
+ * webs directamente (CORS), así que usa servicios públicos de reenvío que
+ * devuelven el HTML y el CSS originales. Se lanzan de forma escalonada (si el
+ * primero tarda, arranca el siguiente) y gana el primero que responde bien.
+ * Para webs hechas con JavaScript se pide además la página ya pintada por un
+ * navegador real (r.jina.ai). Si todo falla, la app recurre a la IA.
+ *
+ * Solo se usan con páginas públicas: la URL que se clona pasa por el servicio.
+ */
+import type { IngestOptions, IngestResult } from "../../shared/types";
+import { ingestLinkedPages, ingestWithFetcher, type BinaryFetcher, type FetchedText, type TextFetcher } from "../../shared/ingestCore";
+
+/** Si se pidió clonado multi-página, añade las páginas enlazadas al resultado ya obtenido para `opts.url`. */
+async function withLinkedPages(result: IngestResult, opts: IngestOptions): Promise<IngestResult> {
+  if (!opts.multiPage) return result;
+  try {
+    const extra = await ingestLinkedPages(relayFetcher, relayBinary, result, opts);
+    return { ...result, files: { ...result.files, ...extra.files }, warnings: [...result.warnings, ...extra.warnings] };
+  } catch {
+    return result; // el clonado de páginas enlazadas es un añadido: si falla, se devuelve igualmente el clon de la principal
+  }
+}
+
+interface Relay {
+  name: string;
+  url: (target: string) => string;
+  /** Servicios que responden JSON en lugar del contenido tal cual */
+  json?: (data: unknown) => { status: number; contentType: string; text: string } | null;
+  /** Sirve también para ficheros binarios (fuentes) */
+  binary?: boolean;
+}
+
+const alloriginsJson = (d: unknown) => {
+  const o = d as { contents?: string; status?: { http_code?: number; content_type?: string } };
+  return typeof o?.contents === "string" ? { status: o.status?.http_code ?? 200, contentType: o.status?.content_type ?? "", text: o.contents } : null;
+};
+
+export const RELAYS: Relay[] = [
+  { name: "allorigins", url: (t) => `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`, binary: true },
+  { name: "codetabs", url: (t) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(t)}`, binary: true },
+  { name: "allorigins-json", url: (t) => `https://api.allorigins.win/get?url=${encodeURIComponent(t)}`, json: alloriginsJson },
+  { name: "thingproxy", url: (t) => `https://thingproxy.freeboard.io/fetch/${t}`, binary: true },
+  { name: "whateverorigin", url: (t) => `https://whateverorigin.org/get?url=${encodeURIComponent(t)}`, json: alloriginsJson },
+  { name: "cors.lol", url: (t) => `https://api.cors.lol/?url=${encodeURIComponent(t)}`, binary: true },
+];
+
+/** Respuesta de error del propio servicio de reenvío (p. ej. «se necesita clave»), no la web pedida. */
+export function looksLikeServiceError(text: string): boolean {
+  const t = text.trim();
+  return (
+    t.length < 1200 &&
+    /^[[{]/.test(t) &&
+    /"?(error|message|detail)"?\s*[:=]/i.test(t) &&
+    /api[\s_-]?key|required|invalid|quota|rate.?limit|forbidden|unauthor|not allowed|blocked|sign\s?up|get one at|too many/i.test(t)
+  );
+}
+
+/** Tiempo que se espera a un servicio antes de lanzar también el siguiente */
+const STAGGER_MS = 2500;
+
+const PREFERRED_KEY = "devstudio:preferredRelay";
+
+/** ¿Cuál probar primero? Se recuerda entre sesiones (en este navegador) cuál funcionó la última vez. */
+function readPreferred(): number {
+  try {
+    const name = localStorage.getItem(PREFERRED_KEY);
+    const i = name ? RELAYS.findIndex((r) => r.name === name) : -1;
+    return i === -1 ? 0 : i;
+  } catch {
+    return 0;
+  }
+}
+function writePreferred(i: number) {
+  try {
+    localStorage.setItem(PREFERRED_KEY, RELAYS[i]?.name ?? "");
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+
+/** Último servicio que funcionó: se prueba primero en las siguientes descargas (persiste entre sesiones) */
+let preferred = readPreferred();
+
+/** Proxy propio del usuario (si lo ha configurado en Ajustes): se prueba antes que los públicos. */
+let customProxy = "";
+export function setProxyUrl(url: string): void {
+  customProxy = (url ?? "").trim();
+}
+function customRelay(): Relay | null {
+  if (!customProxy || !/^https?:\/\//i.test(customProxy)) return null;
+  const join = customProxy.includes("?") ? "&" : "?";
+  return { name: "tu-servidor", url: (t) => `${customProxy}${join}url=${encodeURIComponent(t)}`, binary: true };
+}
+
+function ordered(filter?: (r: Relay) => boolean): Relay[] {
+  const base = [...RELAYS.slice(preferred), ...RELAYS.slice(0, preferred)];
+  const list = filter ? base.filter(filter) : base;
+  const custom = customRelay();
+  return custom ? [custom, ...list] : list;
+}
+
+/**
+ * Lanza `attempt` con cada servicio de forma escalonada y devuelve el primer resultado válido.
+ * Al terminar cancela las peticiones que siguen en marcha.
+ */
+export async function raceRelays<T>(relays: Relay[], attempt: (relay: Relay, signal: AbortSignal) => Promise<T>, staggerMs = STAGGER_MS): Promise<T> {
+  if (!relays.length) throw new Error("sin servicios disponibles");
+  const controllers = relays.map(() => new AbortController());
+  return new Promise<T>((resolve, reject) => {
+    let started = 0;
+    let failed = 0;
+    let done = false;
+    let lastError: unknown;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      done = true;
+      clearTimeout(timer);
+      controllers.forEach((c) => c.abort());
+    };
+    const startNext = () => {
+      if (done || started >= relays.length) return;
+      const i = started++;
+      clearTimeout(timer);
+      timer = setTimeout(startNext, staggerMs);
+      attempt(relays[i], controllers[i].signal).then(
+        (value) => {
+          if (done) return;
+          preferred = Math.max(0, RELAYS.indexOf(relays[i]));
+          writePreferred(preferred);
+          finish();
+          resolve(value);
+        },
+        (err) => {
+          if (done) return;
+          lastError = err;
+          failed++;
+          if (failed === relays.length) {
+            finish();
+            reject(lastError instanceof Error ? lastError : new Error("sin respuesta"));
+          } else startNext(); // uno falló: se lanza ya el siguiente sin esperar
+        },
+      );
+    };
+    startNext();
+  });
+}
+
+function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
+  return AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
+}
+
+/** ¿Parece la respuesta de verdad y no una página de error del propio servicio? */
+function plausible(accept: string, target: string, text: string): boolean {
+  if (!text.trim()) return false;
+  if (looksLikeServiceError(text)) return false; // error del propio servicio (clave requerida, límite, etc.)
+  if (/text\/html/.test(accept)) {
+    const head = text.slice(0, 30000);
+    // Páginas de bloqueo o de límite de peticiones (Cloudflare, captchas, el propio servicio)
+    if (/<title>\s*(just a moment|attention required|access denied|403 forbidden|too many requests|rate limit)/i.test(head) || /cf-browser-verification|challenge-platform|g-recaptcha|hcaptcha/i.test(head)) return false;
+    if (text.length < 1500 && /(rate.?limit|too many requests|access denied|forbidden|not allowed|blocked|quota)/i.test(text)) return false;
+    // Página de error/bloqueo de Cloudflare (plantilla con "Reference ID"/"Ray ID", en inglés o español),
+    // que algunos servicios de reenvío devuelven con HTTP 200 y que si no se detecta se clona tal cual
+    // en vez del sitio real.
+    if (/\b(reference id|ray id)\s*:/i.test(head) && /\b(algo sali[oó] mal|something went wrong|sorry,? you (have been|are) blocked|unable to access)\b/i.test(head)) return false;
+    return /<(!doctype|html|head|body|div|main|section|title)\b/i.test(head) || /\.xml(\?|$)/i.test(target);
+  }
+  if (/text\/css/.test(accept)) return !/^\s*(<!doctype|<html|\{"error")/i.test(text);
+  return true;
+}
+
+async function fetchThrough(relay: Relay, target: string, accept: string, timeoutMs: number, maxBytes: number, signal: AbortSignal) {
+  const res = await fetch(relay.url(target), { signal: withTimeout(signal, timeoutMs), credentials: "omit", referrerPolicy: "no-referrer" });
+  const declared = Number(res.headers.get("content-length") ?? 0);
+  if (declared > maxBytes) throw new Error("El recurso es demasiado grande.");
+  let out: { status: number; contentType: string; text: string };
+  if (relay.json) {
+    const parsed = relay.json(await res.json().catch(() => null));
+    if (!parsed) throw new Error(`respuesta no válida de ${relay.name}`);
+    out = parsed;
+  } else {
+    out = { status: res.status, contentType: res.headers.get("content-type") ?? "", text: await res.text() };
+  }
+  if (out.text.length > maxBytes) throw new Error("El recurso es demasiado grande.");
+  // Cualquier error (403 clave, 404 no encontrado, 429 límite, 5xx) significa que ese servicio no sirve: se prueba otro
+  if (out.status >= 400) throw new Error(`HTTP ${out.status}`);
+  if (!plausible(accept, target, out.text)) throw new Error(`respuesta no válida de ${relay.name}`);
+  return out;
+}
+
+export const relayFetcher: TextFetcher = async (url, opts) => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("URL no válida");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Solo se pueden clonar direcciones http(s).");
+  const target = parsed.toString();
+  try {
+    const res = await raceRelays(ordered(), (relay, signal) => fetchThrough(relay, target, opts.accept, opts.timeoutMs, opts.maxBytes, signal));
+    return { finalUrl: target, ...res };
+  } catch (err) {
+    throw new Error(`No se pudo descargar la web (${(err as Error)?.message ?? "sin respuesta"}).`);
+  }
+};
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** Fuentes: se descargan en binario a través de los servicios que devuelven el fichero tal cual. */
+export const relayBinary: BinaryFetcher = (url, opts) =>
+  raceRelays(ordered((r) => !!r.binary), async (relay, signal) => {
+    const res = await fetch(relay.url(url), { signal: withTimeout(signal, opts.timeoutMs), credentials: "omit", referrerPolicy: "no-referrer" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const type = res.headers.get("content-type") ?? "";
+    if (/text\/html|application\/json/i.test(type)) throw new Error("no es un fichero");
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (!buf.length || buf.length > opts.maxBytes) throw new Error("tamaño no válido");
+    return { contentType: type, base64: toBase64(buf) };
+  });
+
+/**
+ * La página tal y como la ve un navegador después de ejecutar su JavaScript
+ * (r.jina.ai la abre en un navegador real). Sirve para webs hechas con React,
+ * Vue, etc. y para webs que bloquean a los otros servicios.
+ */
+export async function fetchRendered(url: string, timeoutMs = 30_000): Promise<FetchedText> {
+  const res = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { "X-Return-Format": "html", "X-Timeout": String(Math.round(timeoutMs / 1000) - 5), "X-With-Shadow-Dom": "true" },
+    signal: AbortSignal.timeout(timeoutMs),
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  if (!plausible("text/html", url, text)) throw new Error("respuesta no válida");
+  return { finalUrl: url, status: 200, contentType: "text/html", text };
+}
+
+/** Captura de pantalla real de la web (para que la IA la copie cuando no se puede descargar su código). */
+export async function fetchSiteScreenshot(url: string, timeoutMs = 30_000): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  const toDataUrl = async (imageUrl: string) => {
+    const img = await fetch(imageUrl, { signal: AbortSignal.timeout(timeoutMs), credentials: "omit", referrerPolicy: "no-referrer" });
+    if (!img.ok || !/^image\//.test(img.headers.get("content-type") ?? "")) throw new Error("sin imagen");
+    const blob = await img.blob();
+    return new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+  };
+  const size = (dataUrl: string) =>
+    new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve({ width: i.naturalWidth, height: i.naturalHeight });
+      i.onerror = () => reject(new Error("imagen no válida"));
+      i.src = dataUrl;
+    });
+  const sources: Array<() => Promise<string>> = [
+    async () => {
+      // Las webs hechas con JavaScript tardan en pintarse: una espera corta capturaría la pantalla a medio
+      // cargar (en blanco o con un spinner), lo que luego hace que la comparación visual salga mal por una
+      // captura de referencia incorrecta, no por el clon.
+      const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false&viewport.width=1280&viewport.height=800&screenshot.fullPage=true&waitForTimeout=3500`;
+      const res = await fetch(api, { signal: AbortSignal.timeout(timeoutMs), credentials: "omit" });
+      const json = (await res.json()) as { status?: string; data?: { screenshot?: { url?: string } } };
+      const shot = json?.data?.screenshot?.url;
+      if (json?.status !== "success" || !shot) throw new Error("sin captura");
+      return toDataUrl(shot);
+    },
+    () => toDataUrl(`https://image.thum.io/get/width/1280/crop/3000/noanimate/${url}`),
+  ];
+  for (const source of sources) {
+    try {
+      const dataUrl = await source();
+      return { dataUrl, ...(await size(dataUrl)) };
+    } catch {
+      /* se prueba el siguiente */
+    }
+  }
+  return null;
+}
+
+/** Compara dos páginas por su título y primer encabezado (ya normalizados) para saber si son "la misma". */
+function samePageFingerprint(a: IngestResult, b: IngestResult): boolean {
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  return !!norm(a.title) && norm(a.title) === norm(b.title) && norm(a.outline[0]?.text ?? "") === norm(b.outline[0]?.text ?? "");
+}
+
+/**
+ * Pide una URL concreta de una web (no la portada) sin JavaScript y comprueba que de verdad es esa
+ * página, no una copia de la portada. Muchas aplicaciones de una sola página (rutas gestionadas por
+ * JavaScript del navegador, como el login de un panel o una app con React/Vue Router) hacen que el
+ * servidor devuelva EXACTAMENTE el mismo HTML base para cualquier dirección, y solo el JavaScript del
+ * navegador decide qué mostrar según la URL; sin ejecutar ese JavaScript, pedir la URL del login descarga
+ * el mismo HTML genérico que la portada. Si se detecta este caso, se usa una versión ya pintada por un
+ * navegador real (que sí ejecuta el JavaScript y navega de verdad a esa dirección) en su lugar.
+ */
+async function resolveIfGenericShell(opts: IngestOptions, first: IngestResult, budgetMs: number): Promise<IngestResult | null> {
+  let home: URL;
+  try {
+    home = new URL(opts.url);
+  } catch {
+    return null;
+  }
+  if (home.pathname.replace(/\/+$/, "").length === 0) return null; // ya es la portada
+  try {
+    const homeResult = await ingestWithFetcher(relayFetcher, { ...opts, url: `${home.origin}/`, budgetMs: Math.min(budgetMs, 15_000) }, undefined);
+    if (!samePageFingerprint(first, homeResult)) return null;
+    const rendered = await fetchRendered(opts.url);
+    const fetcher: TextFetcher = (u, o) => (u === opts.url ? Promise.resolve(rendered) : relayFetcher(u, o));
+    const result = await ingestWithFetcher(fetcher, { ...opts, keepScripts: false, budgetMs }, relayBinary);
+    return {
+      ...result,
+      looksClientRendered: false,
+      warnings: [
+        ...result.warnings,
+        "Esta dirección parece mostrarse solo con JavaScript del navegador (el servidor devolvía la misma página que la portada): se usó una versión ya pintada por un navegador real para traer el contenido específico de esta dirección.",
+      ],
+    };
+  } catch {
+    return null; // si la comprobación o el navegador real fallan, se deja el resultado original
+  }
+}
+
+/** Clona una web con su código real (HTML, CSS y fuentes originales) desde el navegador. */
+export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult> {
+  const budgetMs = opts.budgetMs ?? 50_000;
+  let first: IngestResult | null = null;
+  let firstError: unknown;
+  try {
+    first = await ingestWithFetcher(relayFetcher, { ...opts, budgetMs }, relayBinary);
+    if (!first.looksClientRendered && !first.blockedByAntiBot) {
+      const resolved = await resolveIfGenericShell(opts, first, budgetMs);
+      return withLinkedPages(resolved ?? first, opts);
+    }
+  } catch (err) {
+    firstError = err;
+  }
+  // Web hecha con JavaScript, o que bloqueó la descarga con un sistema antibots (Akamai, Cloudflare…):
+  // en ambos casos lo descargado NO es el contenido real, así que se usa la página ya pintada por un
+  // navegador de verdad en su lugar (que sí pasa por esas comprobaciones como lo haría cualquier visita).
+  try {
+    const rendered = await fetchRendered(opts.url);
+    const fetcher: TextFetcher = (u, o) => (u === opts.url ? Promise.resolve(rendered) : relayFetcher(u, o));
+    const result = await ingestWithFetcher(fetcher, { ...opts, keepScripts: false, budgetMs }, relayBinary);
+    // Si lo renderizado TAMBIÉN es una página de bloqueo, no hay nada mejor que ofrecer: se avisa en vez
+    // de quedarse con cualquiera de las dos versiones (ambas serían esa pantalla de bloqueo, no la web real).
+    if (result.blockedByAntiBot) {
+      if (first && !first.blockedByAntiBot) return withLinkedPages(first, opts);
+      throw new Error("Esta web tiene un sistema de protección antibots (Akamai, Cloudflare…) que impide clonarla automáticamente, incluso con una captura real. Prueba a subir tú mismo una captura de pantalla de la web (botón «Clonar desde un archivo»): la IA la clonará a partir de la imagen.");
+    }
+    if (first && !first.blockedByAntiBot && result.dom.totalElements < first.dom.totalElements) return withLinkedPages(first, opts);
+    return withLinkedPages(
+      {
+        ...result,
+        looksClientRendered: false,
+        warnings: [
+          ...result.warnings,
+          first?.blockedByAntiBot
+            ? "Esta web bloqueó la descarga automática con un sistema antibots (Akamai, Cloudflare…); se usó en su lugar una copia ya pintada por un navegador real, que sí consigue pasar esa comprobación."
+            : "Se copió la página ya pintada por un navegador (la web se genera con JavaScript).",
+        ],
+      },
+      opts,
+    );
+  } catch (err) {
+    if (first && !first.blockedByAntiBot) return withLinkedPages(first, opts);
+    throw err instanceof Error && first?.blockedByAntiBot ? err : firstError instanceof Error ? firstError : new Error("No se pudo descargar la web.");
+  }
+}

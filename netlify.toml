@@ -1,0 +1,21 @@
+# Publicación en Netlify: la interfaz es estática (dist/) y la API vive en una función.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  included_files = []
+
+# Todas las rutas de la aplicación sirven la interfaz (aplicación de una sola página)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
