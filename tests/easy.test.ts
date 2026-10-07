@@ -51,7 +51,15 @@ describe("MULTIPAGE_TEXT_RE (pide clonar varias páginas enlazadas en texto libr
   it("no se activa con una instrucción normal de una sola página", () => {
     expect(MULTIPAGE_TEXT_RE.test("Clónala tal cual, toda la página")).toBe(false);
     expect(MULTIPAGE_TEXT_RE.test("Instala solo el formulario de contacto")).toBe(false);
+    expect(MULTIPAGE_TEXT_RE.test("Instala solo la sección de precios")).toBe(false);
     expect(MULTIPAGE_TEXT_RE.test("cambia los colores a tonos azules")).toBe(false);
+  });
+
+  it("detecta un solo nombre de página conocido (login, acceso, registro…), sin necesitar dos a la vez", () => {
+    expect(MULTIPAGE_TEXT_RE.test("clóname la página tal cual y clóname el login de esta página")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("clona tal cual y clona el formulario de inicio de sesión")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("quiero que cuando le dé clic al botón acceso me lleve al login de la página, en el mismo proyecto")).toBe(true);
+    expect(MULTIPAGE_TEXT_RE.test("clónala y añade también la página de registro")).toBe(true);
   });
 });
 
