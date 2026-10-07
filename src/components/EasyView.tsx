@@ -959,6 +959,11 @@ function ResultScreen() {
             <small className="muted">Tiempo: {formatElapsed(elapsed)} — los modelos gratuitos (sobre todo OpenRouter) pueden tardar: puedes dejar esta pantalla abierta mientras escribe.</small>
           </div>
         )}
+        {!streaming && lastAi?.meta?.warning && (
+          <div className="row wrap small change-status">
+            <span style={{ color: "var(--warning, #c08b1e)" }}>⚠ {lastAi.meta.warning}</span>
+          </div>
+        )}
         {!streaming && lastAi && (lastAi.meta?.changed?.length || lastAi.meta?.error) ? (
           <div className="row wrap small change-status">
             {lastAi.meta?.error ? (

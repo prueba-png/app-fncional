@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { omitLargeDataUris, parseFileBlocks, restoreDataUris, sanitizePath, summarizeFileBlocks } from "../shared/fileBlocks";
+import { omitLargeDataUris, parseFileBlocks, restoreDataUris, sanitizePath, summarizeFileBlocks, unchangedLineRatio } from "../shared/fileBlocks";
 
 describe("parseFileBlocks", () => {
   it("extrae ficheros completos, eliminaciones y prosa", () => {
@@ -89,5 +89,23 @@ describe("omitLargeDataUris / restoreDataUris", () => {
     const { restore } = omitLargeDataUris({ "styles.css": css });
     const aiReturned = { "styles.css": "body{color:blue}" }; // la IA quitó la fuente a propósito
     expect(restoreDataUris(aiReturned, restore)).toEqual(aiReturned);
+  });
+});
+
+describe("unchangedLineRatio (detecta reescrituras completas de un fichero existente)", () => {
+  const original = Array.from({ length: 20 }, (_, i) => `  <div class="line-${i}">contenido ${i}</div>`).join("\n");
+
+  it("devuelve 1 cuando el fichero no cambia", () => {
+    expect(unchangedLineRatio(original, original)).toBe(1);
+  });
+
+  it("es alto cuando solo se tocó una línea (un cambio bien aplicado)", () => {
+    const changed = original.replace("contenido 5", "contenido CINCO");
+    expect(unchangedLineRatio(original, changed)).toBeGreaterThan(0.9);
+  });
+
+  it("es bajo cuando el fichero se reescribió casi entero (línea por línea distinta)", () => {
+    const rewritten = Array.from({ length: 20 }, (_, i) => `  <section id="nueva-${i}">otra cosa ${i}</section>`).join("\n");
+    expect(unchangedLineRatio(original, rewritten)).toBeLessThan(0.2);
   });
 });

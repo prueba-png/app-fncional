@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { hasCaptureRefs, resolveCrops } from "../lib/crops";
 import { memoryAttachments, refersToOriginal } from "../lib/references";
 import type { ChatAttachment, ChatTurn } from "../../shared/types";
-import { omitLargeDataUris, parseFileBlocks, restoreDataUris } from "../../shared/fileBlocks";
+import { omitLargeDataUris, parseFileBlocks, restoreDataUris, unchangedLineRatio } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { ChatMessage } from "../db/db";
 import { streamChat } from "../lib/api";
@@ -211,11 +211,14 @@ export const useChat = create<ChatState>((set, get) => ({
     let stopReason: string | null = null;
     let error: string | undefined;
 
+    // Contenido del proyecto justo antes de este cambio: sirve después para avisar si la IA reescribe un
+    // fichero existente perdiendo la mayor parte de lo que ya había (ver unchangedLineRatio más abajo).
+    const beforeFiles = useStudio.getState().project!.files;
     // Imágenes o fuentes incrustadas a mitad de un fichero (p. ej. un @font-face en base64) pueden pesar
     // cientos de miles de caracteres sin que la IA necesite verlas para un cambio de texto o color: se
     // omiten del envío (y se reponen después si el fichero vuelve sin tocar esa parte), para no superar el
     // límite de tamaño de la petición por datos que la IA ni necesitaba leer.
-    const { files: omittedFiles, restore: dataUriRestore } = omitLargeDataUris(useStudio.getState().project!.files);
+    const { files: omittedFiles, restore: dataUriRestore } = omitLargeDataUris(beforeFiles);
     // Un proyecto con varias páginas clonadas (clonado multi-página) puede superar el presupuesto de
     // cualquier proveedor aunque el cambio pedido no tenga nada que ver con esas páginas adicionales: si
     // no cabe en ninguno, se omite el código de las páginas que el propio texto no menciona por su nombre,
@@ -538,13 +541,32 @@ export const useChat = create<ChatState>((set, get) => ({
       error = "La IA devolvió el fichero sin ningún cambio real. Prueba a describir el cambio de otra forma (indicando el elemento exacto que quieres modificar).";
     }
 
+    // Si la IA reescribió un fichero que YA EXISTÍA perdiendo la mayor parte de su contenido anterior, se
+    // avisa en vez de dejarlo pasar en silencio (el caso típico: "haz funcional el selector de idioma" y
+    // la IA reconstruye el formulario entero de memoria en vez de solo añadirle el código que faltaba).
+    // No se avisa si el propio usuario pidió un rediseño completo, ni en ficheros nuevos o muy pequeños.
+    let warning: string | undefined;
+    const FULL_REDESIGN_RE = /redise[ñn]|nuevo\s+dise[ñn]o|cambia(r)?\s+todo|desde\s+cero|reescribe(lo)?\s+todo|rehaz(lo)?\s+todo/i;
+    if (versionId && !FULL_REDESIGN_RE.test(userMsg.content)) {
+      const afterFiles = useStudio.getState().project?.files ?? {};
+      const rewritten: string[] = [];
+      for (const path of changed) {
+        const before = beforeFiles[path];
+        const after = afterFiles[path];
+        if (!before || !after || before.length < 400 || /^data:/i.test(before)) continue;
+        if (unchangedLineRatio(before, after) < 0.4) rewritten.push(path);
+      }
+      if (rewritten.length)
+        warning = `La IA ha reescrito ${rewritten.length === 1 ? `${rewritten[0]} cambiando` : `${rewritten.join(", ")} cambiando`} la mayor parte de su contenido anterior, más de lo que suele hacer falta para este tipo de cambio. Revisa el resultado; si no es lo que esperabas, pulsa «Deshacer» y vuelve a pedirlo siendo más específico (p. ej. «sin tocar el resto del formulario»).`;
+    }
+
     const assistantMsg: ChatMessage = {
       id: uid("m_"),
       projectId: project.id,
       role: "assistant",
       content: text || (error ? "" : "(respuesta vacía)"),
       createdAt: Date.now(),
-      meta: { model, usage, versionId, changed, deleted: parsed.deleted, error, stopReason },
+      meta: { model, usage, versionId, changed, deleted: parsed.deleted, error, warning, stopReason },
     };
     await db.saveChatMessage(assistantMsg);
     if (get().projectId === project.id) set({ messages: [...get().messages, assistantMsg] });

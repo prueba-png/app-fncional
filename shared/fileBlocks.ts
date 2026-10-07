@@ -10,6 +10,24 @@
  */
 import type { FileMap } from "./types";
 
+/**
+ * Qué fracción de las líneas "con contenido" (no triviales) de `oldContent` sigue apareciendo tal cual en
+ * `newContent`. Sirve para detectar cuándo la IA ha reescrito un fichero de memoria en vez de partir del
+ * contenido real que ya había: un cambio bien aplicado conserva casi todas las líneas no tocadas; una
+ * reescritura completa (aunque visualmente se parezca) casi nunca coincide línea por línea con el original.
+ */
+export function unchangedLineRatio(oldContent: string, newContent: string): number {
+  const oldLines = oldContent
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 3);
+  if (!oldLines.length) return 1;
+  const newLines = new Set(newContent.split("\n").map((l) => l.trim()));
+  let kept = 0;
+  for (const l of oldLines) if (newLines.has(l)) kept++;
+  return kept / oldLines.length;
+}
+
 export interface ParsedFileChanges {
   updated: FileMap;
   deleted: string[];

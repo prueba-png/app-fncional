@@ -50,6 +50,8 @@ export interface ChatMessage {
     error?: string;
     attachments?: string[];
     stopReason?: string | null;
+    /** La IA parece haber reescrito un fichero existente de memoria en vez de partir de su contenido real */
+    warning?: string;
   };
 }
 
