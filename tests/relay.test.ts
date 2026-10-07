@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ingestViaRelay } from "../src/lib/proxyIngest";
+import { ingestViaRelay, plausible } from "../src/lib/proxyIngest";
 
 const PAGE = `<!doctype html><html lang="es"><head><title>Tienda</title><link rel="stylesheet" href="/css/app.css"></head>
 <body><header><h1>Zapatillas</h1></header><img src="/img/z.jpg" alt="Zapatilla"><script src="/app.js"></script></body></html>`;
@@ -35,6 +35,39 @@ describe("ingestViaRelay", () => {
       throw new TypeError("Failed to fetch");
     });
     await expect(ingestViaRelay({ url: "https://caida.example/" })).rejects.toThrow(/No se pudo descargar la web/);
+  });
+
+  it("si un servicio devuelve una pantalla de bloqueo antibots (Akamai), se descarta y se prueba el siguiente", async () => {
+    const AKAMAI_CHALLENGE = `<!doctype html><html><head><title>Challenge Validation</title></head>
+<body><p>Processing your request. If this page doesn't refresh automatically, resubmit your request.</p>
+<p>Powered and protected by Akamai</p></body></html>`;
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      const relay = new URL(input);
+      seen.push(relay.hostname);
+      const target = relay.searchParams.get("quest") ?? relay.searchParams.get("url") ?? "";
+      if (target !== "https://tienda.example/") return new Response("no", { status: 404 });
+      // El primer servicio (allorigins) "pasa" la petición pero en realidad fue bloqueada por Akamai
+      if (relay.hostname === "api.allorigins.win") return new Response(AKAMAI_CHALLENGE, { headers: { "content-type": "text/html" } });
+      return new Response(PAGE, { headers: { "content-type": "text/html" } });
+    });
+
+    const r = await ingestViaRelay({ url: "https://tienda.example/" });
+    // No se queda con la pantalla de Akamai del primer servicio: usa el contenido real del siguiente
+    expect(r.title).toBe("Tienda");
+    expect(r.blockedByAntiBot).toBe(false);
+    expect(seen).toContain("api.codetabs.com");
+  });
+});
+
+describe("plausible (filtra páginas de bloqueo que un servicio de reenvío acepta con HTTP 200)", () => {
+  it("rechaza una pantalla de verificación antibots (Akamai) aunque responda con éxito", () => {
+    const html = `<!doctype html><html><head><title>Challenge Validation</title></head><body><p>Powered and protected by Akamai</p></body></html>`;
+    expect(plausible("text/html", "https://tienda.example/", html)).toBe(false);
+  });
+
+  it("acepta una página normal", () => {
+    expect(plausible("text/html", "https://tienda.example/", PAGE)).toBe(true);
   });
 });
 

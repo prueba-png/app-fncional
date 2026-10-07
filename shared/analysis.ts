@@ -169,7 +169,7 @@ export function detectClientRendered($: cheerio.CheerioAPI): boolean {
 // Firmas conocidas de las páginas de "reto" que sirven los sistemas antibots más comunes en vez del
 // contenido real cuando detectan que la petición no viene de un navegador normal: no son un fallo de esta
 // app, es la propia web bloqueando el acceso automático (igual que vería cualquier otra herramienta).
-const BOT_CHALLENGE_RE =
+export const BOT_CHALLENGE_RE =
   /powered\s+and\s+protected\s+by\s+akamai|challenge[\s-]?validation|checking\s+your\s+browser\s+before\s+accessing|cf-browser-verification|\/cdn-cgi\/challenge-platform\/|just\s+a\s+moment\.{3}|attention\s+required!\s*\|\s*cloudflare|press\s*(&|and)\s*hold|_px-captcha|perimeterx|datadome|geo\.captcha-delivery\.com|request\s+unsuccessful\.\s*incapsula|_incapsula_resource|are\s+you\s+a\s+human/i;
 
 /** Heurística: la respuesta es una página de verificación antibots (Akamai, Cloudflare, PerimeterX…), no el contenido real de la web. */

@@ -10,6 +10,7 @@
  */
 import type { IngestOptions, IngestResult } from "../../shared/types";
 import { ingestLinkedPages, ingestWithFetcher, type BinaryFetcher, type FetchedText, type TextFetcher } from "../../shared/ingestCore";
+import { BOT_CHALLENGE_RE } from "../../shared/analysis";
 
 /** Si se pidió clonado multi-página, añade las páginas enlazadas al resultado ya obtenido para `opts.url`. */
 async function withLinkedPages(result: IngestResult, opts: IngestOptions): Promise<IngestResult> {
@@ -151,13 +152,18 @@ function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
 }
 
 /** ¿Parece la respuesta de verdad y no una página de error del propio servicio? */
-function plausible(accept: string, target: string, text: string): boolean {
+export function plausible(accept: string, target: string, text: string): boolean {
   if (!text.trim()) return false;
   if (looksLikeServiceError(text)) return false; // error del propio servicio (clave requerida, límite, etc.)
   if (/text\/html/.test(accept)) {
     const head = text.slice(0, 30000);
     // Páginas de bloqueo o de límite de peticiones (Cloudflare, captchas, el propio servicio)
     if (/<title>\s*(just a moment|attention required|access denied|403 forbidden|too many requests|rate limit)/i.test(head) || /cf-browser-verification|challenge-platform|g-recaptcha|hcaptcha/i.test(head)) return false;
+    // Página de verificación antibots (Akamai, PerimeterX, DataDome, Incapsula…): se descarta este
+    // servicio de reenvío en concreto para que `raceRelays` pruebe automáticamente con otro (puede que a
+    // ESE otro, desde otra IP, la web no lo bloquee), en vez de aceptar la pantalla de bloqueo como si
+    // fuera el contenido real solo porque fue el primer servicio en responder.
+    if (BOT_CHALLENGE_RE.test(head)) return false;
     if (text.length < 1500 && /(rate.?limit|too many requests|access denied|forbidden|not allowed|blocked|quota)/i.test(text)) return false;
     // Página de error/bloqueo de Cloudflare (plantilla con "Reference ID"/"Ray ID", en inglés o español),
     // que algunos servicios de reenvío devuelven con HTTP 200 y que si no se detecta se clona tal cual
