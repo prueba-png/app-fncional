@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import * as cheerio from "cheerio";
-import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE, MULTIPAGE_TEXT_RE } from "../src/store/easy";
+import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE, MULTIPAGE_TEXT_RE, scriptsRenderBetter } from "../src/store/easy";
+import type { RenderProbe } from "../src/lib/snapshot";
+
+const probe = (p: Partial<RenderProbe>): RenderProbe => ({ text: 0, visible: 0, height: 600, sample: "", ...p });
 import { detectClientRendered } from "../server/lib/domAnalyzer";
 
 describe("normalizeUrl", () => {
@@ -25,6 +28,31 @@ describe("NOSCRIPT_RE (aviso de 'activa JavaScript')", () => {
   it("no se activa con contenido real que no menciona JavaScript", () => {
     expect(NOSCRIPT_RE.test("Bienvenido a nuestra tienda online. Envíos gratis a partir de 30€.")).toBe(false);
     expect(NOSCRIPT_RE.test("Aprende JavaScript con nuestro curso online, totalmente gratis.")).toBe(false);
+  });
+});
+
+describe("scriptsRenderBetter (elige entre el clon con scripts y el estático)", () => {
+  it("si sin scripts solo sale el aviso de 'activa JavaScript', prefiere los scripts aunque rindan poco texto", () => {
+    const withJs = probe({ text: 5, visible: 3 }); // menos de 20 caracteres: antes esto fallaba
+    const without = probe({ text: 400, visible: 1, sample: "Para poder acceder a la aplicación es necesario que actives JavaScript." });
+    expect(scriptsRenderBetter(withJs, without)).toBe(true);
+  });
+
+  it("si sin scripts es el aviso y CON scripts no pintó absolutamente nada, no hay nada mejor que mostrar", () => {
+    const withJs = probe({ text: 0, visible: 0 });
+    const without = probe({ text: 400, visible: 1, sample: "Please enable JavaScript to run this app." });
+    expect(scriptsRenderBetter(withJs, without)).toBe(false);
+  });
+
+  it("sin el aviso de JavaScript, se exige un contenido mínimo y comparable al de la versión estática", () => {
+    const goodStatic = probe({ text: 500, visible: 10, sample: "Bienvenido a nuestra tienda" });
+    expect(scriptsRenderBetter(probe({ text: 5, visible: 1 }), goodStatic)).toBe(false); // muy poco texto: no se fía
+    expect(scriptsRenderBetter(probe({ text: 450, visible: 9 }), goodStatic)).toBe(true); // comparable: se acepta
+  });
+
+  it("sin versión estática con la que comparar, basta con que los scripts muestren contenido real", () => {
+    expect(scriptsRenderBetter(probe({ text: 25, visible: 2 }), null)).toBe(true);
+    expect(scriptsRenderBetter(null, null)).toBe(false);
   });
 });
 

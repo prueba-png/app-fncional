@@ -11,7 +11,7 @@ import { processReferenceFile } from "../lib/media";
 import { getSample, sampleSupportsImages } from "../lib/runtime";
 import { countImages, MAX_IMAGES_PER_REQUEST, referencesToAttachments } from "../lib/references";
 import { readZip } from "../lib/zip";
-import { cssViewport, probeRender, renderSnapshot } from "../lib/snapshot";
+import { cssViewport, probeRender, renderSnapshot, type RenderProbe } from "../lib/snapshot";
 import { compareImages } from "../lib/compare";
 import { dataUrlParts } from "../lib/util";
 import { useChat } from "./chat";
@@ -91,6 +91,23 @@ function readPrecision(): Precision {
 }
 /** Texto típico del aviso que muestran las webs cuando JavaScript no se ejecuta (en varios idiomas). */
 export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|please\s+enable)\s+javascript\b|\bjavascript\s+(is\s+)?(disabled|desactivad[oa]|requer[ei]d?o|necesari[oa])\b|\bneed(s|a)?\s+javascript\b/i;
+
+/**
+ * Al clonar con scripts (para que funcione tal cual la web real), se compara con la versión sin scripts
+ * para saber cuál enseñar: ¿los scripts de verdad funcionan fuera de su web, o se quedan en blanco/rotos?
+ * Si la versión SIN scripts resulta ser justo el aviso de "activa JavaScript" (confirmado inútil: es lo
+ * único que vería cualquier visitante sin JS, nunca contenido real), cualquier contenido real que haya
+ * conseguido pintar la versión CON scripts —aunque sea poco, la página puede tardar en cargar sus datos—
+ * es siempre mejor que mostrar ese aviso, que no le sirve de nada al usuario. Antes se exigía un mínimo de
+ * 20 caracteres de texto también en ese caso, así que una web algo lenta en pintar su primera pantalla
+ * (habitual en webs grandes, como la de un banco) acababa enseñando el aviso inútil en vez de la página.
+ */
+export function scriptsRenderBetter(withJs: RenderProbe | null, without: RenderProbe | null): boolean {
+  if (!withJs) return false;
+  const staticIsNoScriptNotice = !!without && NOSCRIPT_RE.test(without.sample);
+  if (staticIsNoScriptNotice) return withJs.text > 0 || withJs.visible > 0;
+  return withJs.text >= 20 && (!without || (withJs.text >= without.text * 0.6 && withJs.visible >= without.visible * 0.5));
+}
 /** Una URL mencionada dentro del texto libre de "Crear algo nuevo desde cero" (p. ej. «clóname tal-sitio.com»).
  * También reconoce un dominio "pelado" sin protocolo ni "www." (p. ej. «vete a bbva.es y replica…», tal
  * como la gente lo dicta o escribe de forma natural): sin esto, solo "https://bbva.es" o "www.bbva.es" se
@@ -531,18 +548,14 @@ export const useEasy = create<EasyState>((set, get) => {
         if (result.staticFiles) {
           // ¿Funcionan los scripts de la web fuera de ella? Se abren las dos versiones y se elige la que muestra la página completa
           setSteps((steps) => steps.map((st, i) => (i === 1 ? { ...st, label: "Comprobando que el clon se ve igual que la web" } : st)));
+          // Se da algo más de tiempo que el habitual (algunas webs reales, como la de un banco, tardan en
+          // pintar su primera pantalla) antes de comparar cuál de las dos versiones se ve mejor.
           const [withJs, without] = await Promise.all([
-            probeRender(result.files, { baseUrl: result.finalUrl }),
+            probeRender(result.files, { baseUrl: result.finalUrl, waitMs: 4000 }),
             probeRender(result.staticFiles, { baseUrl: result.finalUrl }),
           ]);
           if (signal.aborted) return;
-          // Si la versión sin scripts es solo un aviso de "activa JavaScript" (lo único que vería alguien
-          // con JS desactivado), no sirve de nada compararla por cantidad de texto: ese aviso puede ser
-          // más largo que el contenido real ya desbloqueado, y la comparación por tamaño elegiría por error
-          // el aviso en vez de la página real.
-          const staticIsNoScriptNotice = !!without && NOSCRIPT_RE.test(without.sample);
-          const scriptsWork = !!withJs && withJs.text >= 20 && (staticIsNoScriptNotice || !without || (withJs.text >= without.text * 0.6 && withJs.visible >= without.visible * 0.5));
-          if (!scriptsWork) {
+          if (!scriptsRenderBetter(withJs, without)) {
             files = result.staticFiles;
             note = "Los scripts de esta web no funcionan fuera de ella, así que el clon muestra la página tal como se ve, pero sin sus animaciones ni menús desplegables.";
           }
