@@ -8,6 +8,15 @@ import type { ChatRequest, ChatStreamEvent } from "./types";
 import { summarizeFileBlocks } from "./fileBlocks";
 import { IMPROVE_CHANGE_PROMPT, IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, FILE_CHAR_BUDGET_ANTHROPIC as MAX_FILE_CHARS } from "./prompts";
 
+/**
+ * Cuando web_fetch visita una URL que sus propios filtros de seguridad marcan como
+ * peligrosa (phishing, malware…), no lo señala como error: devuelve el "documento"
+ * con este aviso como si fuera el contenido real de la página, y la IA lo repetiría
+ * tal cual creyendo que es el texto de la web. Se detecta para tratarlo como el
+ * error que realmente es, en vez de dejar que se filtre al usuario.
+ */
+export const UNSAFE_WEB_FETCH_RE = /User\s*Safety:\s*unsafe/i;
+
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
 const FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
@@ -116,6 +125,7 @@ export async function runClaudeChat(
         ...(useFallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       });
       current = stream;
+      let blockedUnsafe = false;
       try {
         for await (const event of stream) {
           if (signal?.aborted) return;
@@ -126,10 +136,26 @@ export async function runClaudeChat(
             const block = event.content_block;
             if (block.type === "fallback") emit({ type: "status", message: `Respuesta continuada por ${block.to.model}` });
             else if (block.type === "server_tool_use" && block.name === "web_fetch") emit({ type: "status", message: "Visitando la web…" });
-            else if (block.type === "web_fetch_tool_result" && (block.content as { type?: string }).type === "web_fetch_tool_result_error") {
-              emit({ type: "status", message: `No se pudo leer la web (${(block.content as { error_code?: string }).error_code ?? "error"})` });
+            else if (block.type === "web_fetch_tool_result") {
+              const content = block.content as { type?: string; error_code?: string; content?: { source?: { data?: string } } };
+              if (content.type === "web_fetch_tool_result_error") {
+                emit({ type: "status", message: `No se pudo leer la web (${content.error_code ?? "error"})` });
+              } else if (UNSAFE_WEB_FETCH_RE.test(content.content?.source?.data ?? "")) {
+                // No se deja seguir: la IA repetiría este aviso tal cual, creyendo que es el contenido real de la página.
+                blockedUnsafe = true;
+                current?.abort();
+                break;
+              }
             }
           }
+        }
+        if (blockedUnsafe) {
+          emit({
+            type: "error",
+            message:
+              "Esta web está marcada como potencialmente peligrosa (phishing o malware) por los filtros de seguridad de la IA, así que no se puede leer directamente. Prueba subiendo una captura de pantalla de la página a mano.",
+          });
+          return;
         }
         final = await stream.finalMessage();
       } catch (err) {
