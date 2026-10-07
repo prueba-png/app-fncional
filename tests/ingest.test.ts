@@ -18,6 +18,9 @@ const LOGIN_PAGE = `<!doctype html><html><head><title>Acceso</title></head>
 <body><h1>Inicia sesión</h1><a href="/">Volver</a>
 <form><input type="text" placeholder="Usuario"><input type="password" placeholder="Contraseña"><button>Entrar</button></form>
 </body></html>`;
+const AKAMAI_CHALLENGE_PAGE = `<!doctype html><html><head><title>Challenge Validation</title></head>
+<body><p>Processing your request. If this page doesn't refresh automatically, resubmit your request.</p>
+<p>Powered and protected by Akamai</p></body></html>`;
 
 let server: http.Server;
 let base = "";
@@ -27,6 +30,7 @@ beforeAll(async () => {
   server = http.createServer((req, res) => {
     if (req.url === "/") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
     if (req.url === "/acceso") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(LOGIN_PAGE);
+    if (req.url === "/bloqueada") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(AKAMAI_CHALLENGE_PAGE);
     if (req.url === "/css/main.css") return res.writeHead(200, { "content-type": "text/css" }).end(CSS);
     if (req.url === "/css/extra.css") return res.writeHead(200, { "content-type": "text/css" }).end(".extra{color:rgb(1, 2, 3)}");
     res.writeHead(404).end();
@@ -98,5 +102,16 @@ describe("ingestUrl", () => {
   it("sin multiPage (por defecto), no clona páginas enlazadas", async () => {
     const r = await ingestUrl({ url: base + "/" });
     expect(r.files["pages/acceso/index.html"]).toBeUndefined();
+  });
+
+  it("detecta una página de verificación antibots (Akamai) en vez de tratarla como el contenido real", async () => {
+    const r = await ingestUrl({ url: base + "/bloqueada" });
+    expect(r.blockedByAntiBot).toBe(true);
+    expect(r.warnings.some((w) => /protecci[oó]n antibots/i.test(w))).toBe(true);
+  });
+
+  it("una página normal no se marca como bloqueada por antibots", async () => {
+    const r = await ingestUrl({ url: base + "/" });
+    expect(r.blockedByAntiBot).toBe(false);
   });
 });

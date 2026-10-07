@@ -8,7 +8,7 @@ import * as cheerio from "cheerio";
 import type { Element } from "domhandler";
 import type { AssetRef, FileMap, IngestOptions, IngestResult } from "./types";
 import { detectDependencies } from "./dependencies";
-import { analyzeCss, assetKind, auditAccessibility, computeDomStats, detectClientRendered, extractOutline } from "./analysis";
+import { analyzeCss, assetKind, auditAccessibility, computeDomStats, detectBotChallenge, detectClientRendered, extractOutline } from "./analysis";
 
 export interface FetchedText {
   finalUrl: string;
@@ -414,6 +414,8 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
   const description = $('meta[name="description"]').attr("content")?.trim() ?? $('meta[property="og:description"]').attr("content")?.trim() ?? "";
   const lang = $("html").attr("lang") ?? "";
   const looksClientRendered = detectClientRendered($);
+  const blockedByAntiBot = detectBotChallenge($);
+  if (blockedByAntiBot) warnings.push("Esta web tiene un sistema de protección antibots (Akamai, Cloudflare…) que bloqueó la descarga automática del código real.");
 
   // --- inventario de assets y URLs absolutas ---
   const assets = new Map<string, AssetRef>();
@@ -596,6 +598,7 @@ export async function ingestWithFetcher(fetcher: TextFetcher, opts: IngestOption
     dependencies,
     warnings,
     looksClientRendered,
+    blockedByAntiBot,
     ...(staticFiles ? { staticFiles } : {}),
   };
 }

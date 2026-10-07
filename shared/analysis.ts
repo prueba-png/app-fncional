@@ -166,6 +166,19 @@ export function detectClientRendered($: cheerio.CheerioAPI): boolean {
   return hasScripts && (emptyMount || (text.length < 40 && visible < 2));
 }
 
+// Firmas conocidas de las páginas de "reto" que sirven los sistemas antibots más comunes en vez del
+// contenido real cuando detectan que la petición no viene de un navegador normal: no son un fallo de esta
+// app, es la propia web bloqueando el acceso automático (igual que vería cualquier otra herramienta).
+const BOT_CHALLENGE_RE =
+  /powered\s+and\s+protected\s+by\s+akamai|challenge[\s-]?validation|checking\s+your\s+browser\s+before\s+accessing|cf-browser-verification|\/cdn-cgi\/challenge-platform\/|just\s+a\s+moment\.{3}|attention\s+required!\s*\|\s*cloudflare|press\s*(&|and)\s*hold|_px-captcha|perimeterx|datadome|geo\.captcha-delivery\.com|request\s+unsuccessful\.\s*incapsula|_incapsula_resource|are\s+you\s+a\s+human/i;
+
+/** Heurística: la respuesta es una página de verificación antibots (Akamai, Cloudflare, PerimeterX…), no el contenido real de la web. */
+export function detectBotChallenge($: cheerio.CheerioAPI): boolean {
+  const body = $("body").text().replace(/\s+/g, " ").trim();
+  const head = $("head").html() ?? "";
+  return BOT_CHALLENGE_RE.test(body) || BOT_CHALLENGE_RE.test(head) || BOT_CHALLENGE_RE.test($("title").text());
+}
+
 // ── CSS ────────────────────────────────────────────────────────────────────
 function topN(map: Map<string, number>, n: number) {
   return [...map.entries()]
@@ -270,5 +283,6 @@ export function analyzeProject(files: FileMap, label: string): ProjectReport {
     dependencies: detectDependencies(files),
     warnings: entry ? [] : ["El proyecto no tiene ningún fichero HTML."],
     looksClientRendered: false,
+    blockedByAntiBot: false,
   };
 }

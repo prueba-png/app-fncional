@@ -335,25 +335,42 @@ export async function ingestViaRelay(opts: IngestOptions): Promise<IngestResult>
   let firstError: unknown;
   try {
     first = await ingestWithFetcher(relayFetcher, { ...opts, budgetMs }, relayBinary);
-    if (!first.looksClientRendered) {
+    if (!first.looksClientRendered && !first.blockedByAntiBot) {
       const resolved = await resolveIfGenericShell(opts, first, budgetMs);
       return withLinkedPages(resolved ?? first, opts);
     }
   } catch (err) {
     firstError = err;
   }
-  // Web hecha con JavaScript (o que bloquea a los servicios): se usa la página ya pintada
+  // Web hecha con JavaScript, o que bloqueó la descarga con un sistema antibots (Akamai, Cloudflare…):
+  // en ambos casos lo descargado NO es el contenido real, así que se usa la página ya pintada por un
+  // navegador de verdad en su lugar (que sí pasa por esas comprobaciones como lo haría cualquier visita).
   try {
     const rendered = await fetchRendered(opts.url);
     const fetcher: TextFetcher = (u, o) => (u === opts.url ? Promise.resolve(rendered) : relayFetcher(u, o));
     const result = await ingestWithFetcher(fetcher, { ...opts, keepScripts: false, budgetMs }, relayBinary);
-    if (first && result.dom.totalElements < first.dom.totalElements) return withLinkedPages(first, opts);
+    // Si lo renderizado TAMBIÉN es una página de bloqueo, no hay nada mejor que ofrecer: se avisa en vez
+    // de quedarse con cualquiera de las dos versiones (ambas serían esa pantalla de bloqueo, no la web real).
+    if (result.blockedByAntiBot) {
+      if (first && !first.blockedByAntiBot) return withLinkedPages(first, opts);
+      throw new Error("Esta web tiene un sistema de protección antibots (Akamai, Cloudflare…) que impide clonarla automáticamente, incluso con una captura real. Prueba a subir tú mismo una captura de pantalla de la web (botón «Clonar desde un archivo»): la IA la clonará a partir de la imagen.");
+    }
+    if (first && !first.blockedByAntiBot && result.dom.totalElements < first.dom.totalElements) return withLinkedPages(first, opts);
     return withLinkedPages(
-      { ...result, looksClientRendered: false, warnings: [...result.warnings, "Se copió la página ya pintada por un navegador (la web se genera con JavaScript)."] },
+      {
+        ...result,
+        looksClientRendered: false,
+        warnings: [
+          ...result.warnings,
+          first?.blockedByAntiBot
+            ? "Esta web bloqueó la descarga automática con un sistema antibots (Akamai, Cloudflare…); se usó en su lugar una copia ya pintada por un navegador real, que sí consigue pasar esa comprobación."
+            : "Se copió la página ya pintada por un navegador (la web se genera con JavaScript).",
+        ],
+      },
       opts,
     );
-  } catch {
-    if (first) return withLinkedPages(first, opts);
-    throw firstError instanceof Error ? firstError : new Error("No se pudo descargar la web.");
+  } catch (err) {
+    if (first && !first.blockedByAntiBot) return withLinkedPages(first, opts);
+    throw err instanceof Error && first?.blockedByAntiBot ? err : firstError instanceof Error ? firstError : new Error("No se pudo descargar la web.");
   }
 }

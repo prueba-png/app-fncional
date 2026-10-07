@@ -76,6 +76,8 @@ export interface IngestResult {
   warnings: string[];
   /** La página original apenas tiene contenido sin JavaScript (SPA): la réplica sin scripts saldría vacía */
   looksClientRendered: boolean;
+  /** Lo descargado es una página de verificación antibots (Akamai, Cloudflare…), no el contenido real */
+  blockedByAntiBot: boolean;
   /** Solo si se pidieron los scripts: la misma réplica sin scripts, por si la versión con scripts no se ve bien fuera de la web */
   staticFiles?: FileMap;
 }
