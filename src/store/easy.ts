@@ -99,11 +99,6 @@ export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|
  * ficheros habituales (.css, .js, .png, .pdf…) quedan fuera a propósito para no confundirlos con una URL. */
 export const TEXT_URL_RE =
   /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|app|co|info|biz|shop|store|online|gob|gov|edu|mil|mx|ar|cl|pe|uy|py|ec|bo|ve|us|uk|de|fr|it|pt|nl|ru|cn|jp|es)\b(?:\/[^\s<>"')]*)?/i;
-/** Junto con TEXT_URL_RE: el usuario no solo menciona una web, pide que sea EXACTAMENTE lo que esa página
- * usa de verdad (p. ej. «créame el formulario de login de bbva.es, exactamente el que usa esa página, no
- * algo parecido»). En «Crear algo nuevo desde cero» esto se redirige al mismo motor de descarga real que
- * usa «Clonar una web», en vez de dejar que la IA lo reconstruya de memoria con su herramienta de navegación. */
-export const WANTS_EXACT_RE = /exactamente|tal\s*cual|lo\s*mismo|igual\s*que\s*(tiene|usa)|id[eé]ntic[oa]|copia(lo)?\b|la\s*misma\s*p[aá]gina|que\s*utiliza\s*esa\s*p[aá]gina/i;
 /** El usuario pide clonar varias páginas enlazadas (no solo la principal) escribiéndolo en texto libre, en
  * vez de (o además de) pulsar el botón «Toda la web»: p. ej. «clona hasta cinco páginas», «con su menú y
  * su acceso», «todas las páginas», «clóname el login», «que el botón de acceso lleve al login». Los
@@ -887,14 +882,14 @@ Si la instrucción pide combinar varias imágenes, mostrarlas en orden, con tiem
       const text = prompt.trim();
       if (!text) return;
 
-      // Pide EXACTAMENTE una parte real de una web concreta (p. ej. «créame el formulario de login de
-      // bbva.es, exactamente el que usa, no algo parecido»): una herramienta de navegación del tipo
-      // web_fetch/url_context deja que la IA "redacte" lo que vio, nunca una copia literal del código.
-      // Para una copia de verdad hace falta el mismo motor que usa "Clonar una web" (descarga el HTML y
-      // CSS reales), así que esto se redirige a ese flujo con el resto del texto como instrucción (p. ej.
-      // "solo el formulario de login"), en vez de intentarlo con la IA sola.
+      // Si se menciona una web real (p. ej. «créame el formulario de login de bbva.es»), SIEMPRE se clona
+      // de verdad por defecto, nunca una aproximación "inspirada": una herramienta de navegación del tipo
+      // web_fetch/url_context deja que la IA "redacte" lo que vio, nunca una copia literal del código. Para
+      // una copia de verdad hace falta el mismo motor que usa "Clonar una web" (descarga el HTML y CSS
+      // reales), así que esto se redirige a ese flujo con el resto del texto como instrucción (p. ej. "solo
+      // el formulario de login"), en vez de intentarlo con la IA sola.
       const urlMatch = text.match(TEXT_URL_RE);
-      if (urlMatch && WANTS_EXACT_RE.test(text)) {
+      if (urlMatch) {
         const instruction = text
           .replace(urlMatch[0], " ")
           .replace(/\s{2,}/g, " ")

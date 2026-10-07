@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as cheerio from "cheerio";
-import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE, MULTIPAGE_TEXT_RE, WANTS_EXACT_RE } from "../src/store/easy";
+import { normalizeUrl, NOSCRIPT_RE, TEXT_URL_RE, MULTIPAGE_TEXT_RE } from "../src/store/easy";
 import { detectClientRendered } from "../server/lib/domAnalyzer";
 
 describe("normalizeUrl", () => {
@@ -48,18 +48,6 @@ describe("TEXT_URL_RE (URL mencionada en 'Crear algo nuevo desde cero')", () => 
   });
 });
 
-describe("WANTS_EXACT_RE (pide una copia EXACTA, no una aproximación, en 'Crear desde cero')", () => {
-  it("detecta la petición de exactitud junto a una URL", () => {
-    expect(WANTS_EXACT_RE.test("créame el formulario de login de bbva.es, quiero que sea exactamente el que utiliza esa página oficial")).toBe(true);
-    expect(WANTS_EXACT_RE.test("copia el formulario de registro tal cual de mercadona.es")).toBe(true);
-    expect(WANTS_EXACT_RE.test("quiero lo mismo que tiene stripe.com")).toBe(true);
-  });
-
-  it("no se activa en una petición de inspiración o estilo, no de copia literal", () => {
-    expect(WANTS_EXACT_RE.test("Crea una landing para una cafetería basada en el estilo de stripe.com")).toBe(false);
-    expect(WANTS_EXACT_RE.test("una landing parecida a la de mercadona.es, en tonos verdes")).toBe(false);
-  });
-});
 
 describe("MULTIPAGE_TEXT_RE (pide clonar varias páginas enlazadas en texto libre)", () => {
   it("detecta el número de páginas en dígitos o en palabra", () => {
