@@ -91,8 +91,14 @@ function readPrecision(): Precision {
 }
 /** Texto típico del aviso que muestran las webs cuando JavaScript no se ejecuta (en varios idiomas). */
 export const NOSCRIPT_RE = /\b(enable|activ\w*|habilit\w*|requier\w*|necesit\w*|please\s+enable)\s+javascript\b|\bjavascript\s+(is\s+)?(disabled|desactivad[oa]|requer[ei]d?o|necesari[oa])\b|\bneed(s|a)?\s+javascript\b/i;
-/** Una URL mencionada dentro del texto libre de "Crear algo nuevo desde cero" (p. ej. «clóname tal-sitio.com»). */
-export const TEXT_URL_RE = /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?/i;
+/** Una URL mencionada dentro del texto libre de "Crear algo nuevo desde cero" (p. ej. «clóname tal-sitio.com»).
+ * También reconoce un dominio "pelado" sin protocolo ni "www." (p. ej. «vete a bbva.es y replica…», tal
+ * como la gente lo dicta o escribe de forma natural): sin esto, solo "https://bbva.es" o "www.bbva.es" se
+ * detectaban, así que la frase más natural no activaba la herramienta de navegación real y la IA acababa
+ * inventando un resultado "parecido" en vez de avisar o de visitar la página de verdad. Los dominios de
+ * ficheros habituales (.css, .js, .png, .pdf…) quedan fuera a propósito para no confundirlos con una URL. */
+export const TEXT_URL_RE =
+  /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|app|co|info|biz|shop|store|online|gob|gov|edu|mil|mx|ar|cl|pe|uy|py|ec|bo|ve|us|uk|de|fr|it|pt|nl|ru|cn|jp|es)\b(?:\/[^\s<>"')]*)?/i;
 /** El usuario pide clonar varias páginas enlazadas (no solo la principal) escribiéndolo en texto libre, en
  * vez de (o además de) pulsar el botón «Toda la web»: p. ej. «clona hasta cinco páginas», «con su menú y
  * su acceso», «todas las páginas», «clóname el login», «que el botón de acceso lleve al login». Los

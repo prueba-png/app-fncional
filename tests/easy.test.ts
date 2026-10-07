@@ -34,6 +34,18 @@ describe("TEXT_URL_RE (URL mencionada en 'Crear algo nuevo desde cero')", () => 
     expect(TEXT_URL_RE.test("clona www.ejemplo.com tal cual")).toBe(true);
     expect(TEXT_URL_RE.test("Una landing para una cafetería, en tonos cálidos")).toBe(false);
   });
+
+  it("detecta también un dominio sin protocolo ni «www.» (como se dicta o escribe de forma natural)", () => {
+    expect(TEXT_URL_RE.test("vete a bbva.es y replica el formulario de acceso")).toBe(true);
+    expect(TEXT_URL_RE.test("crea una landing para mercadona.es con su formulario de contacto")).toBe(true);
+    expect(TEXT_URL_RE.test("copia el logo de stripe.com")).toBe(true);
+  });
+
+  it("no confunde un fichero, un precio o un tamaño con un dominio", () => {
+    expect(TEXT_URL_RE.test("usa un icono parecido al de styles.css")).toBe(false);
+    expect(TEXT_URL_RE.test("el archivo pesa 2.5 mb")).toBe(false);
+    expect(TEXT_URL_RE.test("cuesta 19.99 euros al mes")).toBe(false);
+  });
 });
 
 describe("MULTIPAGE_TEXT_RE (pide clonar varias páginas enlazadas en texto libre)", () => {

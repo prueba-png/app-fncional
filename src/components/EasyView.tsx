@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { parseFileBlocks } from "../../shared/fileBlocks";
-import { useEasy, normalizeUrl, MULTIPAGE_TEXT_RE } from "../store/easy";
+import { useEasy, normalizeUrl, MULTIPAGE_TEXT_RE, TEXT_URL_RE } from "../store/easy";
 import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
 import { useChat, improveIdea } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
@@ -22,10 +22,6 @@ import { MicButton } from "./MicButton";
 import { useWakeLock } from "../lib/wakeLock";
 
 const ACCEPT = "image/*,video/*,application/pdf,.svg,.html,.htm,.css,.js,.zip,.txt,.md,.json";
-/** Detecta si el usuario mencionó una URL de referencia dentro de una instrucción de cambio más larga
- * (p. ej. «pon los mismos colores que https://stripe.com»), para que la IA pueda leerla de verdad en vez
- * de ignorarla: sin esto, «Aplicar cambio» nunca activaba la herramienta de leer la web. */
-const TEXT_URL_RE = /\bhttps?:\/\/[^\s<>"')]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"')]*)?/i;
 
 export function EasyView() {
   const stage = useEasy((s) => s.stage);
