@@ -7,7 +7,7 @@ import { ingestUrl } from "../server/lib/domAnalyzer";
 const PAGE = `<!doctype html><html><head><title>Fixture</title>
 <link rel="stylesheet" href="/css/main.css"><style>.hero{color:#fff}</style>
 <script src="/app.js"></script></head>
-<body onload="evil()"><header><nav><a href="/x">Inicio</a> <a href="/acceso">Acceso</a></nav></header>
+<body onload="evil()"><header><nav><a href="/x">Inicio</a> <a href="/acceso">Acceso</a> <a href="/login?return_to=%2F&amp;locale=es&amp;ui_hint=full">Login</a></nav></header>
 <h1>Título</h1><h3>Salto</h3>
 <img src="/img/a.png"><img data-src="/img/lazy.jpg" alt="lazy">
 <form><input type="email" placeholder="Correo"></form>
@@ -30,6 +30,9 @@ beforeAll(async () => {
   server = http.createServer((req, res) => {
     if (req.url === "/") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(PAGE);
     if (req.url === "/acceso") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(LOGIN_PAGE);
+    // El enlace real lleva la query escapada como en HTML (&amp;); si no se deshace ese escape antes de
+    // pedirla, el servidor recibe parámetros rotos ("amp;locale" en vez de "locale") y esta ruta no coincide.
+    if (req.url === "/login?return_to=%2F&locale=es&ui_hint=full") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(LOGIN_PAGE);
     if (req.url === "/bloqueada") return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(AKAMAI_CHALLENGE_PAGE);
     if (req.url === "/css/main.css") return res.writeHead(200, { "content-type": "text/css" }).end(CSS);
     if (req.url === "/css/extra.css") return res.writeHead(200, { "content-type": "text/css" }).end(".extra{color:rgb(1, 2, 3)}");
@@ -97,6 +100,11 @@ describe("ingestUrl", () => {
     expect(r.files["pages/acceso/index.html"]).toContain('href="index.html"');
     // Un enlace roto de la web original (/x, 404) no debe romper el clonado: simplemente se omite
     expect(r.warnings.some((w) => /clon(ó|aron).*página.*enlazada/i.test(w))).toBe(true);
+    // Un enlace con varios parámetros (como un login con return_to, locale, …) va en el HTML con el "&"
+    // escapado como "&amp;": si no se deshace ese escape antes de pedirla, esta página enlazada fallaba
+    // siempre (el servidor recibía "amp;locale" en vez de "locale").
+    expect(r.files["pages/login/index.html"]).toContain("Inicia sesión");
+    expect(r.warnings.some((w) => /no se pudo clonar la página enlazada.*login/i.test(w))).toBe(false);
   });
 
   it("sin multiPage (por defecto), no clona páginas enlazadas", async () => {

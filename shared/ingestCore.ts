@@ -5,6 +5,7 @@
  * servidor descarga directamente y el navegador usa un servicio de reenvío.
  */
 import * as cheerio from "cheerio";
+import { decodeHTML } from "entities";
 import type { Element } from "domhandler";
 import type { AssetRef, FileMap, IngestOptions, IngestResult } from "./types";
 import { detectDependencies } from "./dependencies";
@@ -637,17 +638,21 @@ function sameOriginLinks(html: string, baseUrl: string, excludeUrl: string, limi
   const out: string[] = [];
   for (const m of html.matchAll(/<a\s+[^>]*href="(https?:\/\/[^"]+)"/gi)) {
     if (out.length >= limit) break;
+    // El HTML serializado escapa el `&` de la query string como `&amp;` (correcto en HTML); hay que
+    // deshacerlo antes de tratarlo como URL, o una página con varios parámetros (como un login con
+    // `return_to`, `locale`, etc.) se corta mal y la descarga de esa página enlazada falla siempre.
+    const href = decodeHTML(m[1]);
     let u: URL;
     try {
-      u = new URL(m[1]);
+      u = new URL(href);
     } catch {
       continue;
     }
     if (u.origin !== origin) continue;
-    const n = normalize(m[1]);
+    const n = normalize(href);
     if (seen.has(n)) continue;
     seen.add(n);
-    out.push(m[1]);
+    out.push(href);
   }
   return out;
 }
@@ -695,8 +700,9 @@ export async function ingestLinkedPages(
       localFor.set(link.split("#")[0].replace(/\/$/, ""), `${folder}/index.html`);
       for (const [path, content] of Object.entries(sub.files)) extraFiles[`${folder}/${path}`] = content;
       cloned++;
-    } catch {
-      warnings.push(`No se pudo clonar la página enlazada ${link}; se omite.`);
+    } catch (err) {
+      const reason = (err as Error)?.message;
+      warnings.push(`No se pudo clonar la página enlazada ${link}${reason ? ` (${reason})` : ""}; se omite.`);
     }
   }
   if (!cloned) return { files: {}, warnings };
