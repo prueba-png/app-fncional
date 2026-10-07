@@ -14,6 +14,7 @@ import { summarizeFileBlocks } from "../../shared/fileBlocks";
 import { sanitizeKey } from "./util";
 import { relayFetcher } from "./proxyIngest";
 import {
+  IMPROVE_CHANGE_PROMPT,
   IMPROVE_PROMPT,
   REFERENCE_PROMPT,
   SYSTEM_PROMPT,
@@ -163,6 +164,7 @@ function toolAvailabilityNote(hasFetchTool: boolean, hasSearchTool: boolean): st
 
 function systemText(req: ChatRequest, hasFetchTool: boolean, hasSearchTool: boolean): string {
   if (req.mode === "improve-prompt") return IMPROVE_PROMPT;
+  if (req.mode === "improve-change") return IMPROVE_CHANGE_PROMPT;
   const base = req.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT;
   return base + toolAvailabilityNote(hasFetchTool, hasSearchTool);
 }

@@ -52,32 +52,34 @@ function buildProviderAttempts(studio: ReturnType<typeof useStudio.getState>, re
 }
 
 /**
- * Reescribe una idea breve como un prompt más detallado (modo "Idealizar"), usando el mismo turno de
- * IA que «Crear desde cero» pero sin tocar el proyecto, el historial ni la vista previa: solo da texto.
- * Si una IA agota su cupo, salta a la siguiente exactamente igual que al aplicar un cambio.
+ * Reescribe un texto (una idea breve para crear desde cero, o un cambio a pedir sobre un proyecto ya
+ * creado, a menudo dictado por voz) como una instrucción más precisa, usando el mismo turno de IA que el
+ * resto de la app pero sin tocar el proyecto, el historial ni la vista previa: solo da texto. Si una IA
+ * agota su cupo, salta a la siguiente exactamente igual que al aplicar un cambio.
  */
-export async function improveIdea(idea: string, signal: AbortSignal): Promise<string> {
+async function improveText(text: string, signal: AbortSignal, mode: "improve-prompt" | "improve-change", files: Record<string, string>, activeFile?: string): Promise<string> {
   const studio = useStudio.getState();
-  const attempts = buildProviderAttempts(studio);
+  const attempts = buildProviderAttempts(studio, mode === "improve-change" ? filesContextChars(files) : undefined);
   if (!attempts.length) throw new Error("Conecta la IA gratuita (clave de Google) en Ajustes.");
-  let text = "";
+  let out = "";
   let lastErr: unknown;
   for (let i = 0; i < attempts.length; i++) {
     const a = attempts[i];
     try {
-      text = "";
+      out = "";
       await a.run(
         {
           apiKey: a.apiKey,
           model: studio.settings.model,
           effort: studio.settings.effort,
           history: [],
-          prompt: idea,
-          files: {},
-          mode: "improve-prompt",
+          prompt: text,
+          files,
+          activeFile,
+          mode,
         },
         (e) => {
-          if (e.type === "text") text += e.text;
+          if (e.type === "text") out += e.text;
         },
         signal,
       );
@@ -87,13 +89,32 @@ export async function improveIdea(idea: string, signal: AbortSignal): Promise<st
       lastErr = err;
       if ((err as Error).name === "AbortError") throw err;
       const name = (err as Error).name;
-      if ((name === "QuotaError" || name === "NetworkError") && !text && i < attempts.length - 1) continue;
+      if ((name === "QuotaError" || name === "NetworkError" || name === "SizeError") && !out && i < attempts.length - 1) continue;
       throw err;
     }
   }
   if (lastErr) throw lastErr;
-  if (!text.trim()) throw new Error("La IA no devolvió ningún texto. Inténtalo de nuevo.");
-  return text.trim();
+  if (!out.trim()) throw new Error("La IA no devolvió ningún texto. Inténtalo de nuevo.");
+  return out.trim();
+}
+
+/** Modo "Idealizar" en «Crear algo nuevo desde cero»: no hay proyecto todavía, así que no se envían ficheros. */
+export function improveIdea(idea: string, signal: AbortSignal): Promise<string> {
+  return improveText(idea, signal, "improve-prompt", {});
+}
+
+/**
+ * Modo "Idealizar" en «¿Quieres cambiar algo?»: el proyecto ya existe, así que se le enseñan sus ficheros
+ * actuales (recortados si hiciera falta, igual que al aplicar un cambio de verdad) para que pueda nombrar
+ * el elemento exacto en vez de quedarse en algo genérico.
+ */
+export function improveChange(text: string, signal: AbortSignal): Promise<string> {
+  const project = useStudio.getState().project;
+  if (!project) return improveText(text, signal, "improve-change", {});
+  const { files: omitted } = omitLargeDataUris(project.files);
+  const bestBudget = Math.max(0, ...buildProviderAttempts(useStudio.getState()).map((a) => a.charBudget));
+  const files = trimLinkedPagesForBudget(omitted, text, bestBudget);
+  return improveText(text, signal, "improve-change", files, project.activeFile);
 }
 
 interface SendOptions {

@@ -6,7 +6,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ChatRequest, ChatStreamEvent } from "./types";
 import { summarizeFileBlocks } from "./fileBlocks";
-import { IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, FILE_CHAR_BUDGET_ANTHROPIC as MAX_FILE_CHARS } from "./prompts";
+import { IMPROVE_CHANGE_PROMPT, IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, FILE_CHAR_BUDGET_ANTHROPIC as MAX_FILE_CHARS } from "./prompts";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
@@ -85,7 +85,14 @@ export async function runClaudeChat(
   const toolNote = tools
     ? "\n\nHerramientas de navegación web en esta conversación: SÍ tienes conectada la de visitar una URL real (web_fetch). No hace falta que lo anuncies con una etiqueta de texto: simplemente úsala."
     : "\n\nHerramientas de navegación web en esta conversación: NINGUNA. No tienes forma de visitar ninguna URL ni de buscar en internet ahora mismo. Si la petición depende de eso, dilo claramente en tu explicación en vez de inventar el contenido o de escribir texto que simule haber usado una herramienta (como una etiqueta <web_fetch> u otra parecida): eso no ejecuta nada de verdad y confundiría al usuario.";
-  const system = (body.mode === "improve-prompt" ? IMPROVE_PROMPT : body.mode === "generate-from-reference" ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}` : SYSTEM_PROMPT) + toolNote;
+  const system =
+    (body.mode === "improve-prompt"
+      ? IMPROVE_PROMPT
+      : body.mode === "improve-change"
+        ? IMPROVE_CHANGE_PROMPT
+        : body.mode === "generate-from-reference"
+          ? `${SYSTEM_PROMPT}\n\n${REFERENCE_PROMPT}`
+          : SYSTEM_PROMPT) + toolNote;
 
   let current: ReturnType<typeof client.beta.messages.stream> | null = null;
   const onAbort = () => current?.abort();

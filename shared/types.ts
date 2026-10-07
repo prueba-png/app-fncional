@@ -116,7 +116,7 @@ export interface ChatRequest {
   files: FileMap;
   activeFile?: string;
   attachments?: ChatAttachment[];
-  mode?: "edit" | "generate-from-reference" | "improve-prompt";
+  mode?: "edit" | "generate-from-reference" | "improve-prompt" | "improve-change";
   /** Permite a la IA leer páginas web (herramienta web_fetch); se usa para clonar por enlace sin servidor */
   webFetch?: boolean;
   /** Permite a la IA buscar en internet (Google) antes de responder, para usar datos reales; solo Gemini por ahora */

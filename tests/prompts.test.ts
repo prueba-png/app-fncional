@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REFERENCE_PROMPT, SYSTEM_PROMPT, trimLinkedPagesForBudget } from "../shared/prompts";
+import { IMPROVE_CHANGE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, trimLinkedPagesForBudget } from "../shared/prompts";
 
 describe("instrucciones de fidelidad de logotipos", () => {
   it("REFERENCE_PROMPT prohíbe sustituir logotipos por bloques de color", () => {
@@ -54,5 +54,17 @@ describe("trimLinkedPagesForBudget (proyectos multi-página grandes)", () => {
     expect(out["pages/acceso/index.html"]).toBe(files["pages/acceso/index.html"]);
     expect(out["pages/acceso/styles.css"]).toBe(files["pages/acceso/styles.css"]);
     expect(out["pages/menu/index.html"]).toMatch(/Página clonada "menu"/); // la no mencionada sigue recortada
+  });
+});
+
+describe("IMPROVE_CHANGE_PROMPT (idealizar un cambio dictado sobre un proyecto ya creado)", () => {
+  it("no genera código ni aplica el cambio, solo devuelve la instrucción pulida", () => {
+    expect(IMPROVE_CHANGE_PROMPT).toMatch(/NO generes HTML, CSS, JavaScript ni ningún <file>/i);
+    expect(IMPROVE_CHANGE_PROMPT).toMatch(/NO apliques el cambio tú mismo/i);
+  });
+
+  it("pide nombrar el elemento exacto y dejar claro que el resto no se toca", () => {
+    expect(IMPROVE_CHANGE_PROMPT).toMatch(/n[oó]mbralo tal cual aparece en el código/i);
+    expect(IMPROVE_CHANGE_PROMPT).toMatch(/el resto del proyecto debe quedar exactamente igual/i);
   });
 });

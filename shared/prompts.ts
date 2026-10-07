@@ -71,6 +71,27 @@ El prompt mejorado debe:
 - Mantenerse en un solo párrafo o una lista corta de viñetas: no te extiendas más de lo necesario para que sea un prompt claro, no un informe.
 - Si el usuario ya fue muy concreto y detallado, no inventes nada nuevo: limítate a ordenar y pulir la redacción.`;
 
+/**
+ * Modo "idealizar cambio": el usuario describe (a menudo dictando por voz, de forma menos ordenada) un
+ * cambio sobre un proyecto YA CREADO. Aquí sí se le muestran los ficheros actuales del proyecto (más abajo),
+ * para que pueda nombrar el elemento exacto en vez de quedarse en algo genérico. Como en "idealizar" (crear
+ * desde cero), no se genera código ni <file> aquí: solo el texto de la instrucción ya pulida, para que el
+ * usuario la revise antes de pulsar «Aplicar».
+ */
+export const IMPROVE_CHANGE_PROMPT = `El usuario quiere pedir un cambio sobre un proyecto que YA EXISTE (más abajo tienes sus ficheros actuales).
+A menudo lo dicta por voz, así que puede venir desordenado, repetido o con muletillas. Tu única tarea es reescribirlo
+como una instrucción de cambio precisa y concreta, en español, para pegarla en el cuadro de "aplicar cambio" de un
+editor. NO generes HTML, CSS, JavaScript ni ningún <file>, y NO apliques el cambio tú mismo: devuelve SOLO el texto
+de la instrucción ya pulida, nada más (ni explicaciones antes ni después).
+
+La instrucción pulida debe:
+- Conservar EXACTAMENTE lo que pidió, sin añadir funciones, secciones o alcance que no mencionó.
+- Si en los ficheros actuales identificas con claridad el elemento concreto del que habla (un id, una clase, un texto visible, una sección), nómbralo tal cual aparece en el código, para que no haya ambigüedad sobre qué tocar.
+- Dejar explícito que el resto del proyecto debe quedar exactamente igual (p. ej. terminar con algo como "sin tocar el resto de la página/el formulario/el diseño ya hecho"), salvo que el propio usuario haya pedido un cambio general.
+- Quitar muletillas, repeticiones y dudas propias del habla, pero sin cambiar lo que pidió ni "mejorarlo" por iniciativa propia.
+- Mantenerse en una frase o una lista corta de viñetas: no te extiendas más de lo necesario.
+- Si el usuario ya fue muy concreto, no inventes nada nuevo: limítate a ordenar y pulir la redacción.`;
+
 /** Presupuestos de caracteres por proveedor de IA, según el contexto real que admite cada uno. */
 export const FILE_CHAR_BUDGET_GEMINI = 1_500_000;
 export const FILE_CHAR_BUDGET_ANTHROPIC = 600_000;

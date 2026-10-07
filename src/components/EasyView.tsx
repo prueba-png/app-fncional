@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { parseFileBlocks } from "../../shared/fileBlocks";
 import { useEasy, normalizeUrl, MULTIPAGE_TEXT_RE, TEXT_URL_RE } from "../store/easy";
 import { useStudio, aiAvailable, needsApiKey } from "../store/studio";
-import { useChat, improveIdea } from "../store/chat";
+import { useChat, improveChange, improveIdea } from "../store/chat";
 import { exportSourceZip } from "../lib/zip";
 import { backupToTelegram, telegramReady } from "../lib/backup";
 import { canResume, resumePrompt, sanitizeKey, slugify, timeAgo } from "../lib/util";
@@ -722,6 +722,7 @@ function ResultScreen() {
   const [translateOpen, setTranslateOpen] = useState(false);
   const [extraImages, setExtraImages] = useState<File[]>([]);
   const [preparing, setPreparing] = useState(false);
+  const [improvingChange, setImprovingChange] = useState(false);
   const imageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setShowKey(false), [project?.id]);
@@ -758,6 +759,25 @@ function ResultScreen() {
     const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|svg)$/i.test(f.name));
     if (imgs.length) setExtraImages((prev) => [...prev, ...imgs].slice(0, MAX_IMAGES_PER_REQUEST));
     if (imgs.length < files.length) toast("Aquí solo se pueden añadir imágenes. Para vídeos o ZIP, empieza un clon nuevo.", "info");
+  };
+
+  const improveChangeText = async () => {
+    const idea = change.trim();
+    if (!idea || improvingChange || streaming || preparing) return;
+    if (missingKey) {
+      setShowKey(true);
+      return;
+    }
+    setImprovingChange(true);
+    try {
+      const better = await improveChange(idea, new AbortController().signal);
+      setChange(better);
+      toast("Cambio precisado. Revísalo y pulsa «Aplicar» cuando te guste.", "success");
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setImprovingChange(false);
+    }
   };
 
   const applyChange = async () => {
@@ -1050,6 +1070,15 @@ function ResultScreen() {
             aria-label="Describe el cambio que quieres"
           />
           <MicButton big disabled={streaming || preparing} onText={(t) => setChange((c) => (c.trim() ? `${c.trim()} ${t}` : t))} />
+          <button
+            className="btn big icon"
+            aria-label="Idealizar el cambio"
+            title="La IA precisa lo que has dictado o escrito en una instrucción exacta (nombra el elemento concreto, sin tocar el resto), antes de aplicarlo"
+            disabled={!change.trim() || improvingChange || streaming || preparing}
+            onClick={() => void improveChangeText()}
+          >
+            {improvingChange ? <span className="spinner" /> : <Icon name="wand" />}
+          </button>
           {streaming ? (
             <button className="btn danger big" aria-label="Detener" onClick={() => useChat.getState().stop()}>
               <Icon name="stop" /> <span className="label">Detener</span>
