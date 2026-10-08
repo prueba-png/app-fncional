@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeKey } from "../src/lib/util";
+import { sanitizeKey, splitApiKeys } from "../src/lib/util";
 
 describe("sanitizeKey", () => {
   const SUFFIX = "0".repeat(64);
@@ -22,5 +22,24 @@ describe("sanitizeKey", () => {
 
   it("no toca los caracteres visibles de la clave", () => {
     expect(sanitizeKey(FAKE)).toBe(FAKE);
+  });
+});
+
+describe("splitApiKeys (varias claves de Google, cada una con su propio cupo)", () => {
+  it("separa por comas, punto y coma o saltos de línea, limpiando cada una", () => {
+    expect(splitApiKeys("AIzaAAA,AIzaBBB")).toEqual(["AIzaAAA", "AIzaBBB"]);
+    expect(splitApiKeys("AIzaAAA\nAIzaBBB")).toEqual(["AIzaAAA", "AIzaBBB"]);
+    expect(splitApiKeys("AIzaAAA; AIzaBBB")).toEqual(["AIzaAAA", "AIzaBBB"]);
+    expect(splitApiKeys("  AIzaAAA  ,  AIzaBBB  ")).toEqual(["AIzaAAA", "AIzaBBB"]);
+  });
+
+  it("con una sola clave, se comporta igual que antes", () => {
+    expect(splitApiKeys("AIzaSoloUna")).toEqual(["AIzaSoloUna"]);
+    expect(splitApiKeys("")).toEqual([]);
+    expect(splitApiKeys("   ")).toEqual([]);
+  });
+
+  it("quita duplicados", () => {
+    expect(splitApiKeys("AIzaAAA,AIzaAAA,AIzaBBB")).toEqual(["AIzaAAA", "AIzaBBB"]);
   });
 });

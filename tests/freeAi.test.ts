@@ -177,6 +177,36 @@ describe("cupo agotado", () => {
   });
 });
 
+describe("varias claves de Google a la vez (cada una con su propio cupo diario)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("si la primera clave agota su cupo, se prueba automáticamente la siguiente sin que el usuario haga nada", async () => {
+    const seenKeys: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-multi");
+      const key = (init?.headers as Record<string, string> | undefined)?.["x-goog-api-key"] ?? new URL(url).searchParams.get("key") ?? "";
+      seenKeys.push(key);
+      if (key === "k-multi-1") return new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } }), { status: 429 });
+      return sse([{ candidates: [{ content: { parts: [{ text: "ok con la segunda clave" }] }, finishReason: "STOP" }] }]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamGemini(makeReq("k-multi-1,k-multi-2"), (e) => events.push(e), new AbortController().signal);
+    const text = events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text).join("");
+    expect(text).toBe("ok con la segunda clave");
+    expect(seenKeys).toEqual(["k-multi-1", "k-multi-2"]);
+  });
+
+  it("si TODAS las claves agotan su cupo diario, el aviso lo deja claro (no sugiere añadir una clave que ya tiene)", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-flash-multi-agotado");
+      return new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", details: [{ violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }] } }), { status: 429 });
+    });
+    await expect(streamGemini(makeReq("k-multi-a,k-multi-b"), () => {}, new AbortController().signal)).rejects.toMatchObject({
+      name: "QuotaError",
+      message: expect.stringContaining("todas las claves"),
+    });
+  });
+});
+
 describe("fallos de red (Load failed)", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("Gemini reintenta el mismo modelo si la red falla y luego funciona", async () => {

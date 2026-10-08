@@ -11,7 +11,7 @@ import type {
   ChatStreamEvent,
 } from "../../shared/types";
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
-import { sanitizeKey } from "./util";
+import { sanitizeKey, splitApiKeys } from "./util";
 import { relayFetcher } from "./proxyIngest";
 import {
   IMPROVE_CHANGE_PROMPT,
@@ -533,27 +533,22 @@ export async function transcribeAudio(
   return text.trim();
 }
 
-export async function streamGemini(
+/** Intenta una única clave de Google (todos sus modelos con cupo libre). `null` si funcionó. */
+async function streamGeminiWithKey(
+  apiKey: string,
   req: ChatRequest,
   emit: Emit,
   signal: AbortSignal,
-): Promise<void> {
-  if (!req.apiKey)
-    throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
-  // Por si la clave se guardó antes de limpiar caracteres invisibles del copia-pega, se limpia también aquí
-  req.apiKey = sanitizeKey(req.apiKey);
+): Promise<{ limit: boolean; daily: boolean; escalated: boolean; last: unknown } | null> {
   let lastLimit = false;
   let lastQuotaDaily = false;
   let lastQuotaEscalated = false;
   let last: unknown;
   // Se usan los modelos que la propia cuenta tiene disponibles (siempre los últimos), no una lista fija
-  const models = await discoverGeminiModels(req.apiKey);
-  // Si todos los modelos agotaron su cupo hace poco, no se reintentan: se avisa ya para saltar a otra IA
-  const rested = models.filter((m) => (exhaustedUntil.get(m) ?? 0) < Date.now()).slice(0, 5);
-  if (!rested.length)
-    throw quotaError(
-      "El cupo gratuito de Google está agotado por ahora (se renueva solo). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
-    );
+  const models = await discoverGeminiModels(apiKey);
+  // Si todos los modelos de ESTA clave agotaron su cupo hace poco, no se reintentan con ella
+  const rested = models.filter((m) => (exhaustedUntil.get(`${apiKey}:${m}`) ?? 0) < Date.now()).slice(0, 5);
+  if (!rested.length) return { limit: true, daily: true, escalated: false, last: undefined };
   for (const model of rested) {
     let withUrlTool = !!req.webFetch;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -562,9 +557,9 @@ export async function streamGemini(
           type: "status",
           message: `Generando con Google ${model} (gratis)…`,
         });
-        await geminiOnce(model, req, emit, signal, withUrlTool);
-        consecutivePerMinuteHits.delete(req.apiKey!);
-        return;
+        await geminiOnce(model, { ...req, apiKey }, emit, signal, withUrlTool);
+        consecutivePerMinuteHits.delete(apiKey);
+        return null;
       } catch (err) {
         // Solo es «detenida por el usuario» si SU señal está marcada; un AbortError con esa señal
         // intacta es nuestro propio límite de tiempo al conectar (fallo de red), no un «Detener» real
@@ -593,8 +588,8 @@ export async function streamGemini(
             // Si Google ya ha dicho "por minuto" dos veces seguidas DESPUÉS de haber esperado el tiempo que
             // él mismo indicó, el aviso no era preciso: el límite real se comporta como diario (no se libera
             // en un minuto), así que se avisa de eso y no se insiste más en poco tiempo.
-            const hits = (consecutivePerMinuteHits.get(req.apiKey!) ?? 0) + 1;
-            consecutivePerMinuteHits.set(req.apiKey!, hits);
+            const hits = (consecutivePerMinuteHits.get(apiKey) ?? 0) + 1;
+            consecutivePerMinuteHits.set(apiKey, hits);
             if (hits >= 2) {
               lastQuotaDaily = true;
               lastQuotaEscalated = true;
@@ -603,7 +598,7 @@ export async function streamGemini(
           // Por minuto: se reintenta pronto (lo que Google indique, o 70 s por defecto). Por día (o tras
           // repetirse): no hay nada que ganar insistiendo hasta que Google reinicie el cupo, así que no se
           // reintenta en horas.
-          exhaustedUntil.set(model, Date.now() + (lastQuotaDaily ? 6 * 60 * 60_000 : (e.quota?.retryMs ?? 60_000) + 10_000));
+          exhaustedUntil.set(`${apiKey}:${model}`, Date.now() + (lastQuotaDaily ? 6 * 60 * 60_000 : (e.quota?.retryMs ?? 60_000) + 10_000));
         }
         break;
       }
@@ -611,12 +606,40 @@ export async function streamGemini(
     const e = last as ProviderError;
     if (!(e instanceof ProviderError) || !e.tryNext) break;
   }
+  return { limit: lastLimit, daily: lastQuotaDaily, escalated: lastQuotaEscalated, last };
+}
+
+export async function streamGemini(
+  req: ChatRequest,
+  emit: Emit,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!req.apiKey)
+    throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
+  // Por si la(s) clave(s) se guardaron antes de limpiar caracteres invisibles del copia-pega, se limpia aquí también.
+  // Puede haber varias (separadas por comas): cada una tiene su propio cupo diario independiente, así que si una
+  // se queda sin cupo se prueba con la siguiente antes de rendirse, sin que el usuario tenga que hacer nada.
+  const keys = splitApiKeys(req.apiKey);
+  if (!keys.length) throw new Error("Falta la clave gratuita de Google. Añádela en Ajustes.");
+  let lastLimit = false;
+  let lastQuotaDaily = false;
+  let lastQuotaEscalated = false;
+  let last: unknown;
+  for (const key of keys) {
+    const result = await streamGeminiWithKey(key, req, emit, signal);
+    if (!result) return; // funcionó con esta clave
+    lastLimit = result.limit;
+    lastQuotaDaily = result.daily;
+    lastQuotaEscalated = result.escalated;
+    last = result.last;
+  }
+  const multi = keys.length > 1;
   if (lastLimit)
     throw quotaError(
       lastQuotaEscalated
-        ? "Sigue dando el mismo límite de Google después de haber esperado: es probable que en realidad sea el cupo DIARIO (el aviso de «por minuto» de Google no siempre es exacto), no uno que se libere enseguida. Añade una clave gratuita de OpenRouter en Ajustes para seguir sin esperar, o vuelve a intentarlo más tarde."
+        ? `Sigue dando el mismo límite de Google después de haber esperado${multi ? ", con las claves que tienes" : ""}: es probable que en realidad sea el cupo DIARIO (el aviso de «por minuto» de Google no siempre es exacto), no uno que se libere enseguida. ${multi ? "Añade otra clave gratuita más (de otra cuenta de Google) o una de OpenRouter" : "Añade otra clave gratuita de Google (de otra cuenta) o una de OpenRouter"} en Ajustes para seguir sin esperar, o vuelve a intentarlo más tarde.`
         : lastQuotaDaily
-          ? "Has agotado el cupo gratuito DIARIO de Google con este modelo (Google lo reinicia él solo, normalmente a medianoche hora del Pacífico de EE. UU., que puede ser por la mañana en España). Añade una clave gratuita de OpenRouter en Ajustes y la app se turnará sola mientras tanto."
+          ? `Has agotado el cupo gratuito DIARIO de Google${multi ? " con todas las claves que tienes guardadas" : ""} (Google lo reinicia él solo, normalmente a medianoche hora del Pacífico de EE. UU., que puede ser por la mañana en España). ${multi ? "Añade otra clave más (de otra cuenta de Google) o una gratuita de OpenRouter" : "Añade otra clave gratuita de Google (de otra cuenta de Google, cada una tiene su propio cupo) o una gratuita de OpenRouter"} en Ajustes y la app se turnará sola mientras tanto.`
           : "Google ha puesto un límite de peticiones por minuto; espera un minuto y vuelve a intentarlo. También puedes añadir una clave gratuita de OpenRouter en Ajustes y la app se turnará sola.",
     );
   if (isNetworkError(last)) throw networkFailedError(friendlyMessage(last));

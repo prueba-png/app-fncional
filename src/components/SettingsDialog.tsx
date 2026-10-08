@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useStudio } from "../store/studio";
 import type { Settings } from "../db/db";
 import { telegramTest } from "../lib/api";
-import { sanitizeKey } from "../lib/util";
+import { sanitizeKey, splitApiKeys } from "../lib/util";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
 import { mediaRecorderSupported, speechSupported } from "./MicButton";
@@ -52,7 +52,7 @@ export function SettingsDialog() {
     await updateSettings({
       ...draft,
       anthropicApiKey: sanitizeKey(draft.anthropicApiKey),
-      geminiApiKey: sanitizeKey(draft.geminiApiKey),
+      geminiApiKey: splitApiKeys(draft.geminiApiKey).join(","),
       openrouterApiKey,
       telegramToken: sanitizeKey(draft.telegramToken),
       telegramChatId: draft.telegramChatId.trim(),
@@ -125,7 +125,7 @@ export function SettingsDialog() {
               className="input mono"
               type={showKey ? "text" : "password"}
               autoComplete="off"
-              placeholder="AIza… o AQ…"
+              placeholder="AIza… o AQ… (puedes pegar varias separadas por comas)"
               value={draft.geminiApiKey}
               onChange={(e) => set("geminiApiKey", e.target.value)}
             />
@@ -148,7 +148,9 @@ export function SettingsDialog() {
               aistudio.google.com/apikey
             </a>{" "}
             con tu cuenta de Google y pulsa «Create API key». Se guarda solo en
-            este navegador.
+            este navegador. Cada clave tiene su propio cupo diario: si pegas
+            varias aquí separadas por comas (de cuentas de Google distintas),
+            la app se turna sola entre ellas cuando una se queda sin cupo.
           </small>
         </label>
       )}

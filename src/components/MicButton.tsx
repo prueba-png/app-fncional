@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useStudio } from "../store/studio";
 import { transcribeAudio } from "../lib/freeAi";
+import { splitApiKeys } from "../lib/util";
 import { Icon } from "./Icon";
 
 /** API mínima de SpeechRecognition / webkitSpeechRecognition (no está en los tipos de TS por defecto). */
@@ -98,8 +99,9 @@ export function MicButton({ onText, disabled, big }: { onText: (text: string) =>
       return;
     }
     // Sin SpeechRecognition (Safari): grabar y transcribir con Gemini.
-    const geminiApiKey = useStudio.getState().settings.geminiApiKey;
-    if (!geminiApiKey.trim()) {
+    // Si hay varias claves guardadas (separadas por comas, para turnarse al clonar), aquí basta con la primera.
+    const geminiApiKey = splitApiKeys(useStudio.getState().settings.geminiApiKey)[0] ?? "";
+    if (!geminiApiKey) {
       useStudio
         .getState()
         .toast("Para dictar por voz en este navegador hace falta una clave gratuita de Google en Ajustes (se usa solo para convertir tu voz en texto).", "error");

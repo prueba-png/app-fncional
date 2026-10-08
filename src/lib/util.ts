@@ -12,6 +12,22 @@ export function sanitizeKey(raw: string): string {
     .replace(/\s+/g, "");
 }
 
+/**
+ * Para campos que admiten VARIAS claves a la vez (hoy solo la de Google): cada clave gratuita tiene su
+ * propio cupo diario independiente, así que si alguien crea dos o tres claves (cada una en su propia
+ * cuenta de Google), la app puede turnarse entre ellas cuando una se queda sin cupo, en vez de depender
+ * de una sola y esperar a que Google la reinicie. Admite pegarlas separadas por comas, saltos de línea o
+ * espacios (lo que resulte más natural al copiarlas una a una).
+ */
+export function splitApiKeys(raw: string): string[] {
+  const seen = new Set<string>();
+  for (const part of raw.split(/[,;\n]+/)) {
+    const key = sanitizeKey(part);
+    if (key) seen.add(key);
+  }
+  return [...seen];
+}
+
 export function uid(prefix = ""): string {
   const rnd = crypto.getRandomValues(new Uint8Array(10));
   return prefix + Array.from(rnd, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 16);
