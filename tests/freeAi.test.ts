@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamGemini, streamOpenRouter, transcribeAudio } from "../src/lib/freeAi";
+import { connectTimeout, streamGemini, streamOpenRouter, transcribeAudio } from "../src/lib/freeAi";
 import { detectProvider } from "../src/db/db";
 import type { ChatStreamEvent } from "../shared/types";
 
@@ -207,6 +207,29 @@ describe("varias claves de Google a la vez (cada una con su propio cupo diario)"
   });
 });
 
+describe("connectTimeout (límite de tiempo SOLO para conectar, no para toda la respuesta)", () => {
+  it("si se llama a clear() (el fetch ya respondió), no aborta aunque pase de sobra el tiempo del límite", async () => {
+    const { signal, clear } = connectTimeout(new AbortController().signal, 20);
+    clear();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(signal.aborted).toBe(false);
+  });
+
+  it("si NO se llama a clear() (no hay ni respuesta), aborta pasado el tiempo del límite", async () => {
+    const { signal } = connectTimeout(new AbortController().signal, 20);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("si el usuario cancela (su señal), aborta también aunque ya se hubiera llamado a clear()", async () => {
+    const user = new AbortController();
+    const { signal, clear } = connectTimeout(user.signal, 20);
+    clear();
+    user.abort();
+    expect(signal.aborted).toBe(true);
+  });
+});
+
 describe("fallos de red (Load failed)", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("Gemini reintenta el mismo modelo si la red falla y luego funciona", async () => {
@@ -240,6 +263,36 @@ describe("fallos de red (Load failed)", () => {
     });
     await expect(streamGemini(makeReq("k-red3"), () => {}, new AbortController().signal)).rejects.toMatchObject({ name: "NetworkError" });
     expect(attempts).toBe(2);
+  });
+
+  it("no corta una respuesta sana solo por tardar más de 20 s en completarse (antes eso bastaba para que saltara 'se perdió la conexión')", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", async (url: string) => {
+        if (isDiscovery(url)) return modelList("gemini-flash-lento");
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "parte1 " }] } }] })}\r\n\r\n`));
+            // Deliberadamente más de los 20 s del límite para "conectar": si ese límite siguiera vivo
+            // durante toda la respuesta (el fallo original), esto la cortaría a mitad.
+            setTimeout(() => {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "parte2" }] }, finishReason: "STOP" }] })}\r\n\r\n`));
+              controller.close();
+            }, 22_000);
+          },
+        });
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      });
+      const events: ChatStreamEvent[] = [];
+      const done = streamGemini(makeReq("k-lento"), (e) => events.push(e), new AbortController().signal);
+      await vi.advanceTimersByTimeAsync(22_000);
+      await done;
+      const text = events.filter((e) => e.type === "text").map((e) => (e as { text: string }).text).join("");
+      expect(text).toBe("parte1 parte2");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Gemini activa la búsqueda en internet cuando se pide (google_search) además de leer una URL si toca", async () => {

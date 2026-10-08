@@ -25,9 +25,28 @@ import {
 /** Tiempo máximo para conectar antes de dar la conexión por caída (una conexión colgada no debe tardar minutos en fallar) */
 const CONNECT_TIMEOUT_MS = 20_000;
 
-/** Combina la señal de cancelación del usuario con un límite de tiempo para conectar. */
-function withConnectTimeout(signal: AbortSignal, ms = CONNECT_TIMEOUT_MS): AbortSignal {
-  return AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal;
+/**
+ * Señal para el `fetch()` inicial: aborta si no hay ni respuesta (ni los encabezados) en `ms`, además de
+ * respetar la cancelación real del usuario. OJO: a diferencia de un `AbortSignal.timeout` normal, el
+ * límite de tiempo se desactiva en cuanto `fetch()` resuelve con una respuesta (con `clear()`), para no
+ * seguir contando mientras se va leyendo el cuerpo en streaming. Antes el mismo límite de 20 s se usaba
+ * tal cual como señal durante TODA la petición (también mientras se leía la respuesta en streaming, que
+ * puede tardar bastante más que eso con un proyecto grande): pasados esos 20 s se abortaba una respuesta
+ * que iba perfectamente, y eso se reportaba como "se perdió la conexión" aunque la conexión fuera buena.
+ * La lectura del cuerpo ya tiene su propio vigilante de conexión colgada («stall», en `readSse`), que si
+ * no se resetea con cada dato que llega.
+ */
+export function connectTimeout(signal: AbortSignal, ms = CONNECT_TIMEOUT_MS): { signal: AbortSignal; clear: () => void } {
+  const ac = new AbortController();
+  if (signal.aborted) ac.abort(signal.reason);
+  // Esta escucha NO se quita en clear(): la señal devuelta sigue siendo la que de verdad cancela la
+  // petición (incluida la lectura del cuerpo en streaming ya en marcha) si el usuario pulsa «Detener»,
+  // durante toda la petición, no solo mientras se está conectando.
+  signal.addEventListener("abort", () => ac.abort(signal.reason));
+  const timer = setTimeout(() => ac.abort(new DOMException("No hubo respuesta al conectar", "TimeoutError")), ms);
+  // clear() solo desactiva el LÍMITE DE TIEMPO (una vez ya ha llegado respuesta, no tiene sentido seguir
+  // contando): la cancelación real del usuario sigue funcionando igual después de llamar a esto.
+  return { signal: ac.signal, clear: () => clearTimeout(timer) };
 }
 
 /**
@@ -398,27 +417,33 @@ async function geminiOnce(
     ],
   });
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": req.apiKey!,
+  const connect = connectTimeout(signal);
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": req.apiKey!,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemText(req, withUrlTool, !!req.webSearch) }] },
+          contents,
+          generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
+          // Con enlace: Gemini puede leer la web él mismo (herramienta gratuita «url_context»)
+          // Con búsqueda: Gemini puede consultar Google para datos reales antes de responder («google_search»)
+          ...(withUrlTool || req.webSearch
+            ? { tools: [...(withUrlTool ? [{ url_context: {} }] : []), ...(req.webSearch ? [{ google_search: {} }] : [])] }
+            : {}),
+        }),
+        signal: connect.signal,
       },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemText(req, withUrlTool, !!req.webSearch) }] },
-        contents,
-        generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
-        // Con enlace: Gemini puede leer la web él mismo (herramienta gratuita «url_context»)
-        // Con búsqueda: Gemini puede consultar Google para datos reales antes de responder («google_search»)
-        ...(withUrlTool || req.webSearch
-          ? { tools: [...(withUrlTool ? [{ url_context: {} }] : []), ...(req.webSearch ? [{ google_search: {} }] : [])] }
-          : {}),
-      }),
-      signal: withConnectTimeout(signal),
-    },
-  );
+    );
+  } finally {
+    connect.clear();
+  }
   if (!res.ok) throw await geminiError(res);
 
   let emitted = 0;
@@ -779,12 +804,18 @@ async function openRouterOnce(
   if (hasFetchTool) {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let data: { choices?: Array<{ message?: OrMessage; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; error?: { message?: string; code?: number } };
-      const toolRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${req.apiKey}`, "X-Title": "Ganx" },
-        body: JSON.stringify({ model, messages, stream: false, temperature: 0.3, max_tokens: 16000, tools: [FETCH_URL_TOOL], tool_choice: "auto" }),
-        signal: withConnectTimeout(signal),
-      });
+      const toolConnect = connectTimeout(signal);
+      let toolRes: Response;
+      try {
+        toolRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${req.apiKey}`, "X-Title": "Ganx" },
+          body: JSON.stringify({ model, messages, stream: false, temperature: 0.3, max_tokens: 16000, tools: [FETCH_URL_TOOL], tool_choice: "auto" }),
+          signal: toolConnect.signal,
+        });
+      } finally {
+        toolConnect.clear();
+      }
       if (!toolRes.ok) break; // el modelo elegido probablemente no admite "tools": se sigue sin ellas más abajo
       try {
         data = await toolRes.json();
@@ -822,19 +853,25 @@ async function openRouterOnce(
     // herramientas, con lo que se haya conseguido leer hasta ahora en el propio historial de mensajes.
   }
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${req.apiKey}`,
-      "X-Title": "Ganx",
-    },
-    // Sin max_tokens, muchos backends gratuitos de OpenRouter usan un límite de salida por defecto muy
-    // bajo (a veces 1-2 mil tokens), cortando la página a medias (un fichero completo y el resto vacío).
-    // Se pide explícitamente un máximo generoso; si el modelo no llega a tanto, no pasa nada (no es obligatorio).
-    body: JSON.stringify({ model, messages, stream: true, temperature: 0.3, max_tokens: 16000 }),
-    signal: withConnectTimeout(signal),
-  });
+  const mainConnect = connectTimeout(signal);
+  let res: Response;
+  try {
+    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${req.apiKey}`,
+        "X-Title": "Ganx",
+      },
+      // Sin max_tokens, muchos backends gratuitos de OpenRouter usan un límite de salida por defecto muy
+      // bajo (a veces 1-2 mil tokens), cortando la página a medias (un fichero completo y el resto vacío).
+      // Se pide explícitamente un máximo generoso; si el modelo no llega a tanto, no pasa nada (no es obligatorio).
+      body: JSON.stringify({ model, messages, stream: true, temperature: 0.3, max_tokens: 16000 }),
+      signal: mainConnect.signal,
+    });
+  } finally {
+    mainConnect.clear();
+  }
   if (!res.ok) {
     let message = "";
     try {
