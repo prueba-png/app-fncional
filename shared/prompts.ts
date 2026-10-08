@@ -150,8 +150,15 @@ export function buildFilesContext(files: Record<string, string>, activeFile: str
     const content = fileContextContent(rawContent);
     total += content.length;
     if (total > maxChars) {
+      // Un proyecto grande de verdad (p. ej. un clon fiel, con su CSS y JS completos) puede superar el
+      // sitio del proveedor usado sin que haya nada "de más" que quitar: para alguien que no programa,
+      // pedirle que "elimine CSS no usado" no es una instrucción que pueda seguir. La salida real es
+      // usar una IA con más sitio (Gemini, gratis, admite hasta 1.500.000 caracteres); se sugiere eso en
+      // vez de pedir una edición manual del código.
       const err = new Error(
-        `El proyecto supera ${maxChars.toLocaleString("es")} caracteres; reduce el tamaño de los ficheros (p. ej. elimina CSS no usado) antes de enviarlo al asistente.`,
+        maxChars < FILE_CHAR_BUDGET_GEMINI
+          ? `Este proyecto (${total.toLocaleString("es")} caracteres) no cabe en el límite de la IA conectada (${maxChars.toLocaleString("es")}). Añade una clave gratuita de Google (Gemini) en Ajustes: admite hasta 1.500.000 caracteres y la app la usará sola para este cambio.`
+          : `El proyecto supera ${maxChars.toLocaleString("es")} caracteres, más de lo que admite cualquier IA conectada. Prueba a quitar del proyecto alguna página o sección que no necesites para este cambio.`,
       );
       err.name = "SizeError";
       throw err;

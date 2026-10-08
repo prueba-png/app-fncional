@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMPROVE_CHANGE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, trimLinkedPagesForBudget } from "../shared/prompts";
+import { IMPROVE_CHANGE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, trimLinkedPagesForBudget, FILE_CHAR_BUDGET_GEMINI } from "../shared/prompts";
 
 describe("instrucciones de fidelidad de logotipos", () => {
   it("REFERENCE_PROMPT prohíbe sustituir logotipos por bloques de color", () => {
@@ -66,5 +66,22 @@ describe("IMPROVE_CHANGE_PROMPT (idealizar un cambio dictado sobre un proyecto y
   it("pide nombrar el elemento exacto y dejar claro que el resto no se toca", () => {
     expect(IMPROVE_CHANGE_PROMPT).toMatch(/n[oó]mbralo tal cual aparece en el código/i);
     expect(IMPROVE_CHANGE_PROMPT).toMatch(/el resto del proyecto debe quedar exactamente igual/i);
+  });
+});
+
+describe("buildFilesContext (aviso cuando el proyecto no cabe en el proveedor de IA)", () => {
+  const files = { "index.html": "x".repeat(60_000), "styles.css": "y".repeat(60_000) };
+
+  it("si hay una IA gratuita con mucho más sitio (Gemini), sugiere añadirla en vez de pedir editar el código a mano", () => {
+    expect(() => buildFilesContext(files, undefined, 110_000)).toThrowError(
+      expect.objectContaining({ name: "SizeError", message: expect.stringMatching(/añade una clave gratuita de google/i) }),
+    );
+  });
+
+  it("si ya se usa el proveedor con más sitio (Gemini) y ni así cabe, no sugiere añadir Gemini (ya está puesto)", () => {
+    const huge = { "index.html": "x".repeat(FILE_CHAR_BUDGET_GEMINI + 1) };
+    expect(() => buildFilesContext(huge, undefined, FILE_CHAR_BUDGET_GEMINI)).toThrowError(
+      expect.objectContaining({ name: "SizeError", message: expect.not.stringMatching(/añade una clave gratuita de google/i) }),
+    );
   });
 });

@@ -379,7 +379,7 @@ describe("límite de tamaño del proyecto (por proveedor, según su contexto rea
     const bigCss = "body{color:#111}\n".repeat(30_000); // ~480.000 caracteres: cabe en Gemini, no en OpenRouter
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ data: [{ id: "modelo-gratis:free", context_length: 32_000 }] })));
     const req = { ...makeReq("sk-or-v1-grande"), files: { "index.html": "<h1>x</h1>", "styles.css": bigCss } };
-    await expect(streamOpenRouter(req, () => {}, new AbortController().signal)).rejects.toThrow(/supera.*caracteres/i);
+    await expect(streamOpenRouter(req, () => {}, new AbortController().signal)).rejects.toThrow(/no cabe.*añade una clave gratuita de google/i);
   });
 });
 
