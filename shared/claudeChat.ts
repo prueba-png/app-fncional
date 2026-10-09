@@ -9,13 +9,16 @@ import { summarizeFileBlocks } from "./fileBlocks";
 import { IMPROVE_CHANGE_PROMPT, IMPROVE_PROMPT, REFERENCE_PROMPT, SYSTEM_PROMPT, buildFilesContext, FILE_CHAR_BUDGET_ANTHROPIC as MAX_FILE_CHARS } from "./prompts";
 
 /**
- * Cuando web_fetch visita una URL que sus propios filtros de seguridad marcan como
- * peligrosa (phishing, malware…), no lo señala como error: devuelve el "documento"
- * con este aviso como si fuera el contenido real de la página, y la IA lo repetiría
- * tal cual creyendo que es el texto de la web. Se detecta para tratarlo como el
- * error que realmente es, en vez de dejar que se filtre al usuario.
+ * Cuando algo que la IA ha visto (una web con web_fetch, o directamente una imagen adjunta) se marca
+ * como peligroso por los filtros de seguridad de Anthropic, no siempre llega como un error aparte: a
+ * veces el propio contenido que se le muestra al modelo se sustituye por este aviso de clasificación
+ * ("User Safety: unsafe\nSafety Categories: ..."), y el modelo lo repite tal cual en su respuesta,
+ * creyendo que está describiendo la web o la imagen real. Se detecta para tratarlo como el error que
+ * realmente es, en vez de dejar que ese texto en bruto llegue al usuario.
  */
 export const UNSAFE_WEB_FETCH_RE = /User\s*Safety:\s*unsafe/i;
+/** Caracteres del principio de cada bloque de texto que se retienen para comprobar este aviso antes de mostrarlos. */
+const UNSAFE_GUARD_CHARS = 400;
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 /** Modelos que admiten el parámetro `fallbacks: "default"` (reintento automático ante un rechazo). */
@@ -126,14 +129,37 @@ export async function runClaudeChat(
       });
       current = stream;
       let blockedUnsafe = false;
+      let blockedUnsafeSource: "web" | "attachment" = "web";
+      // Al principio de CADA bloque de texto se retiene lo escrito (sin mostrarlo aún) hasta comprobar que
+      // no es el aviso de seguridad repetido tal cual (ver UNSAFE_WEB_FETCH_RE); pasado ese primer tramo,
+      // o si el bloque termina antes, se suelta de golpe y el resto se sigue mostrando en vivo como siempre.
+      let guard: string | null = null;
+      const flushGuard = () => {
+        if (guard) emit({ type: "text", text: guard });
+        guard = null;
+      };
       try {
         for await (const event of stream) {
           if (signal?.aborted) return;
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             emittedText = true;
-            emit({ type: "text", text: event.delta.text });
+            if (guard === null) {
+              emit({ type: "text", text: event.delta.text });
+              continue;
+            }
+            guard += event.delta.text;
+            if (UNSAFE_WEB_FETCH_RE.test(guard)) {
+              // La IA está repitiendo tal cual el aviso de seguridad (de una imagen adjunta marcada como
+              // peligrosa, u otro contenido): se corta antes de que termine de escribirlo.
+              blockedUnsafe = true;
+              blockedUnsafeSource = "attachment";
+              current?.abort();
+              break;
+            }
+            if (guard.length >= UNSAFE_GUARD_CHARS) flushGuard();
           } else if (event.type === "content_block_start") {
             const block = event.content_block;
+            if (block.type === "text") guard = ""; // nuevo bloque de texto: vuelve a retenerse al principio
             if (block.type === "fallback") emit({ type: "status", message: `Respuesta continuada por ${block.to.model}` });
             else if (block.type === "server_tool_use" && block.name === "web_fetch") emit({ type: "status", message: "Visitando la web…" });
             else if (block.type === "web_fetch_tool_result") {
@@ -143,17 +169,23 @@ export async function runClaudeChat(
               } else if (UNSAFE_WEB_FETCH_RE.test(content.content?.source?.data ?? "")) {
                 // No se deja seguir: la IA repetiría este aviso tal cual, creyendo que es el contenido real de la página.
                 blockedUnsafe = true;
+                blockedUnsafeSource = "web";
                 current?.abort();
                 break;
               }
             }
+          } else if (event.type === "content_block_stop") {
+            flushGuard();
           }
         }
+        if (!blockedUnsafe) flushGuard(); // por si el stream acabó sin que llegara un content_block_stop
         if (blockedUnsafe) {
           emit({
             type: "error",
             message:
-              "Esta web está marcada como potencialmente peligrosa (phishing o malware) por los filtros de seguridad de la IA, así que no se puede leer directamente. Prueba subiendo una captura de pantalla de la página a mano.",
+              blockedUnsafeSource === "web"
+                ? "Esta web está marcada como potencialmente peligrosa (phishing o malware) por los filtros de seguridad de la IA, así que no se puede leer directamente. Prueba subiendo una captura de pantalla de la página a mano."
+                : "Uno de los archivos adjuntos (imagen o captura) está marcado como potencialmente peligroso por los filtros de seguridad de la IA, así que no se puede analizar. Prueba con otra captura.",
           });
           return;
         }
