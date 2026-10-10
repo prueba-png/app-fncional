@@ -18,6 +18,19 @@ describe("instrucciones de fidelidad de logotipos", () => {
   });
 });
 
+describe("SYSTEM_PROMPT: el código va antes que la explicación", () => {
+  it("pide devolver los <file> PRIMERO y deja la explicación para el final", () => {
+    const fileIdx = SYSTEM_PROMPT.search(/PRIMERO[\s\S]*?<file path=/i);
+    const explanationIdx = SYSTEM_PROMPT.search(/explicaci[oó]n.*FINAL|FINAL.*explicaci[oó]n/i);
+    expect(fileIdx).toBeGreaterThanOrEqual(0);
+    expect(explanationIdx).toBeGreaterThan(fileIdx);
+  });
+
+  it("explica por qué (si la respuesta se corta, perder la explicación no importa; perder el código sí)", () => {
+    expect(SYSTEM_PROMPT).toMatch(/se corta.*c[oó]digo del cambio|c[oó]digo del cambio.*se corta/i);
+  });
+});
+
 describe("fidelidad a instrucciones largas o con varios pasos", () => {
   it("SYSTEM_PROMPT exige cumplir todos los puntos de un flujo largo, no solo el primero", () => {
     expect(SYSTEM_PROMPT).toMatch(/varios pasos, puntos o condiciones encadenadas/i);
