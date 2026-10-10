@@ -26,6 +26,14 @@ function fileResponse(path: string, content: string) {
   };
 }
 
+/** Emite texto en bruto (para simular un trozo de un <file> a medio terminar o su continuación). */
+function textChunk(text: string, stopReason: string | null = "end_turn") {
+  return async (_req: unknown, onEvent: (e: { type: string; text?: string; model?: string; stopReason?: string | null }) => void) => {
+    onEvent({ type: "text", text });
+    onEvent({ type: "done", model: "gemini-flash-latest (gratis)", stopReason });
+  };
+}
+
 describe("corrección automática de una reescritura destructiva (antes de aplicar nada ni avisar)", () => {
   afterEach(() => {
     streamGemini.mockReset();
@@ -91,5 +99,43 @@ describe("corrección automática de una reescritura destructiva (antes de aplic
     expect(files["styles.css"]).toBe(destructive);
     const lastMsg = useChat.getState().messages.at(-1);
     expect(lastMsg?.meta?.warning).toBeUndefined();
+  });
+});
+
+describe("un fichero cortado por el límite de salida se sigue completando mientras haga falta (no solo una vez)", () => {
+  afterEach(() => {
+    streamGemini.mockReset();
+  });
+
+  it("si hacen falta varias vueltas para terminar un <file>, se insiste hasta cerrarlo del todo (sin el aviso de truncado)", async () => {
+    await setUpProject();
+    const full = `${ORIGINAL_CSS}\n.extra-final { color: blue; }`;
+    const a = full.slice(0, 200);
+    const b = full.slice(200, 400);
+    const c = full.slice(400);
+    streamGemini
+      .mockImplementationOnce(textChunk(`<file path="styles.css">${a}`, "max_tokens"))
+      .mockImplementationOnce(textChunk(b, "max_tokens"))
+      .mockImplementationOnce(textChunk(`${c}</file>`, "end_turn"));
+
+    await useChat.getState().send("añade una regla nueva de color azul al final");
+
+    // El intento original + DOS continuaciones (antes solo se intentaba una, y con un fichero grande no bastaba)
+    expect(streamGemini).toHaveBeenCalledTimes(3);
+    const files = useStudio.getState().project!.files;
+    expect(files["styles.css"]).toBe(full);
+    const lastMsg = useChat.getState().messages.at(-1);
+    expect(lastMsg?.meta?.error).toBeUndefined();
+  });
+
+  it("si de verdad nunca termina de cerrarse, se rinde tras un tope de vueltas (no se queda insistiendo para siempre) y avisa de truncado", async () => {
+    await setUpProject();
+    streamGemini.mockImplementation(textChunk('<file path="styles.css">siempre incompleto ', "max_tokens"));
+
+    await useChat.getState().send("un cambio cualquiera");
+
+    expect(streamGemini).toHaveBeenCalledTimes(6); // 1 intento inicial + 5 continuaciones (el tope)
+    const lastMsg = useChat.getState().messages.at(-1);
+    expect(lastMsg?.meta?.error).toMatch(/truncó/i);
   });
 });

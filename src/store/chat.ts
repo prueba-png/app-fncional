@@ -340,12 +340,15 @@ export const useChat = create<ChatState>((set, get) => ({
     }
 
     let parsed = parseFileBlocks(text);
-    if (parsed.incomplete && !error && !useWeb && !controller.signal.aborted) {
-      // El modelo cortó un fichero a mitad (límite de salida del plan gratuito, o el flujo se interrumpió):
-      // en vez de descartarlo, se le pide que continúe EXACTAMENTE desde donde lo dejó, una sola vez, antes
-      // de rendirse. Se le da como historial su propia respuesta cortada para que sepa dónde seguir.
+    // El modelo cortó un fichero a mitad (límite de salida del plan gratuito o de la propia petición, o el
+    // flujo se interrumpió): en vez de descartarlo, se le pide que continúe EXACTAMENTE desde donde lo
+    // dejó. Un fichero grande de verdad (p. ej. el CSS completo de un clon fiel) puede necesitar más de una
+    // vuelta para terminar de salir, así que se repite mientras siga incompleto, con un tope para no
+    // insistir para siempre si de verdad no hay forma de avanzar.
+    const MAX_CONTINUATIONS = 5;
+    for (let round = 0; parsed.incomplete && !error && !useWeb && !controller.signal.aborted && round < MAX_CONTINUATIONS; round++) {
       try {
-        set({ status: "Terminando el fichero cortado…" });
+        set({ status: round === 0 ? "Terminando el fichero cortado…" : `Terminando el fichero cortado (${round + 1}/${MAX_CONTINUATIONS})…` });
         const contAttempts = buildProviderAttempts(studio, requiredChars);
         const contHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
         let contText = "";
@@ -390,9 +393,11 @@ export const useChat = create<ChatState>((set, get) => ({
         if (!contErr && contText) {
           text += contText;
           parsed = parseFileBlocks(text);
+        } else {
+          break; // sin texto nuevo no hay forma de seguir avanzando: se deja como está (se avisará igual que antes)
         }
       } catch {
-        /* si la continuación también falla, se deja como estaba y se avisa igual que antes */
+        break; // si una vuelta falla del todo, se deja lo conseguido hasta ahora (se avisará igual que antes)
       }
     }
 
