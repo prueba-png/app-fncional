@@ -458,6 +458,21 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     }
 
+    // Usado tanto para decidir si vale la pena corregir una reescritura excesiva como para el aviso final:
+    // no se interviene si el propio usuario pidió un rediseño completo.
+    const FULL_REDESIGN_RE = /redise[ñn]|nuevo\s+dise[ñn]o|cambia(r)?\s+todo|desde\s+cero|reescribe(lo)?\s+todo|rehaz(lo)?\s+todo/i;
+    /** Rutas de `candidate` que sustituyen casi todo el contenido anterior sin que el propio usuario pidiera un rediseño. */
+    const overwrittenPaths = (candidate: Record<string, string>): string[] => {
+      if (FULL_REDESIGN_RE.test(userMsg.content)) return [];
+      const out: string[] = [];
+      for (const [path, after] of Object.entries(candidate)) {
+        const before = beforeFiles[path];
+        if (!before || before.length < 400 || /^data:/i.test(before)) continue;
+        if (unchangedLineRatio(before, after) < 0.4) out.push(path);
+      }
+      return out;
+    };
+
     // Solo se aplican cambios si el proyecto activo sigue siendo el mismo
     const stillSameProject = useStudio.getState().project?.id === project.id;
     const changed = Object.keys(parsed.updated);
@@ -475,6 +490,82 @@ export const useChat = create<ChatState>((set, get) => ({
           toDelete = [...new Set([...toDelete, ...crops.deleted])];
         } catch {
           /* sin recortes: se aplica tal cual */
+        }
+      }
+      // Antes de guardar nada: si lo que se va a escribir sustituye la mayor parte de un fichero que ya
+      // existía (el caso típico: "haz funcional el selector de idioma" y la IA reconstruye el formulario
+      // entero de memoria), se le da una oportunidad de corregirlo ella misma, insistiendo en que debe
+      // partir del código actual y tocar solo lo pedido, antes de aplicar nada y de avisar al usuario.
+      const toFix = overwrittenPaths(toWrite);
+      if (toFix.length && !controller.signal.aborted) {
+        try {
+          set({ status: "La IA ha reescrito más de la cuenta: pidiéndole que lo haga sin tocar el resto…" });
+          const fixAttempts = buildProviderAttempts(studio, requiredChars);
+          const fixHistory: ChatTurn[] = [...history, { role: "user", content: userMsg.content }, { role: "assistant", content: text }];
+          let fixText = "";
+          let fixErr: unknown;
+          for (let i = 0; i < fixAttempts.length; i++) {
+            const a = fixAttempts[i];
+            try {
+              fixText = "";
+              await a.run(
+                {
+                  apiKey: a.apiKey,
+                  model: settings.model,
+                  effort: settings.effort,
+                  history: fixHistory,
+                  prompt: `Tu respuesta anterior reescribió ${toFix.length === 1 ? `${toFix[0]} cambiando` : `${toFix.join(", ")} cambiando`} la mayor parte de su contenido, mucho más de lo que hacía falta para este cambio: parece que lo reconstruiste de memoria en vez de partir del código real. Vuelve a hacerlo: parte EXACTAMENTE del fichero actual (te lo he vuelto a pasar tal cual está en el proyecto) y aplica SOLO el cambio pedido ("${userMsg.content}"), dejando el resto del fichero carácter por carácter igual que está. Devuelve el bloque <file> completo ya corregido.`,
+                  files: contextFiles,
+                  activeFile: project.activeFile,
+                  mode: opts.mode ?? "edit",
+                },
+                (e) => {
+                  if (e.type === "text") {
+                    fixText += e.text;
+                    set({ streamText: fixText });
+                  } else if (e.type === "done") {
+                    model = e.model;
+                    usage = e.usage;
+                    stopReason = e.stopReason;
+                  }
+                },
+                controller.signal,
+              );
+              fixErr = undefined;
+              break;
+            } catch (err) {
+              fixErr = err;
+              if ((err as Error).name === "AbortError") throw err;
+              if (!fixText && i < fixAttempts.length - 1) continue;
+              throw err;
+            }
+          }
+          if (!fixErr && fixText) {
+            const fixParsed = parseFileBlocks(fixText);
+            if (!fixParsed.incomplete && (Object.keys(fixParsed.updated).length || fixParsed.deleted.length)) {
+              let fixToWrite = restoreDataUris(fixParsed.updated, dataUriRestore);
+              let fixToDelete = fixParsed.deleted;
+              if (hasCaptureRefs(fixToWrite)) {
+                try {
+                  const crops = await resolveCrops(fixToWrite, useStudio.getState().project!.files, project.id);
+                  fixToWrite = crops.updated;
+                  fixToDelete = [...new Set([...fixToDelete, ...crops.deleted])];
+                } catch {
+                  /* sin recortes: se aplica tal cual */
+                }
+              }
+              // Solo se usa la corrección si de verdad conserva más del fichero original que el primer intento
+              // (si sigue reescribiéndolo igual o peor, no se gana nada cambiando a esta versión).
+              if (!overwrittenPaths(fixToWrite).length) {
+                text += `\n${fixText}`;
+                parsed = parseFileBlocks(text);
+                toWrite = { ...toWrite, ...fixToWrite };
+                toDelete = [...new Set([...toDelete, ...fixToDelete])];
+              }
+            }
+          }
+        } catch {
+          /* si la corrección falla, se sigue con la versión original (se avisará más abajo como antes) */
         }
       }
       let v = await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
@@ -562,21 +653,15 @@ export const useChat = create<ChatState>((set, get) => ({
       error = "La IA devolvió el fichero sin ningún cambio real. Prueba a describir el cambio de otra forma (indicando el elemento exacto que quieres modificar).";
     }
 
-    // Si la IA reescribió un fichero que YA EXISTÍA perdiendo la mayor parte de su contenido anterior, se
-    // avisa en vez de dejarlo pasar en silencio (el caso típico: "haz funcional el selector de idioma" y
-    // la IA reconstruye el formulario entero de memoria en vez de solo añadirle el código que faltaba).
-    // No se avisa si el propio usuario pidió un rediseño completo, ni en ficheros nuevos o muy pequeños.
+    // Si, pese al intento de corrección automática de más arriba, lo aplicado sigue reescribiendo la mayor
+    // parte de un fichero que ya existía, se avisa en vez de dejarlo pasar en silencio (el caso típico:
+    // "haz funcional el selector de idioma" y la IA reconstruye el formulario entero de memoria en vez de
+    // solo añadirle el código que faltaba). No se avisa si el usuario pidió un rediseño completo.
     let warning: string | undefined;
-    const FULL_REDESIGN_RE = /redise[ñn]|nuevo\s+dise[ñn]o|cambia(r)?\s+todo|desde\s+cero|reescribe(lo)?\s+todo|rehaz(lo)?\s+todo/i;
-    if (versionId && !FULL_REDESIGN_RE.test(userMsg.content)) {
+    if (versionId) {
       const afterFiles = useStudio.getState().project?.files ?? {};
-      const rewritten: string[] = [];
-      for (const path of changed) {
-        const before = beforeFiles[path];
-        const after = afterFiles[path];
-        if (!before || !after || before.length < 400 || /^data:/i.test(before)) continue;
-        if (unchangedLineRatio(before, after) < 0.4) rewritten.push(path);
-      }
+      const changedAfter = Object.fromEntries(changed.filter((p) => p in afterFiles).map((p) => [p, afterFiles[p]]));
+      const rewritten = overwrittenPaths(changedAfter);
       if (rewritten.length)
         warning = `La IA ha reescrito ${rewritten.length === 1 ? `${rewritten[0]} cambiando` : `${rewritten.join(", ")} cambiando`} la mayor parte de su contenido anterior, más de lo que suele hacer falta para este tipo de cambio. Revisa el resultado; si no es lo que esperabas, pulsa «Deshacer» y vuelve a pedirlo siendo más específico (p. ej. «sin tocar el resto del formulario»).`;
     }
