@@ -125,6 +125,24 @@ describe("IA gratuita", () => {
       message: expect.stringContaining("saturados"),
     });
   });
+
+  it("OpenRouter: si el modelo repite el aviso de 'User Safety: unsafe' de una imagen o web marcada como peligrosa, no lo deja llegar al usuario", async () => {
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "d/modelo-1:free", context_length: 100000, architecture: { input_modalities: ["text", "image"] } }] }));
+      void init;
+      return sse([
+        { choices: [{ delta: { content: "User Safety: unsafe\nSafety Categories: Malware, Fraud/Deception\n\n" } }] },
+        { choices: [{ delta: { content: "He configurado la estructura inicial completa con HTML semántico…" } }] },
+        { choices: [{ delta: {}, finish_reason: "stop" }] },
+        "[DONE]",
+      ]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await expect(streamOpenRouter(makeReq("k-or-unsafe"), (e) => events.push(e), new AbortController().signal)).rejects.toMatchObject({
+      message: expect.stringMatching(/peligroso/i),
+    });
+    expect(events.some((e) => e.type === "text" && /User Safety|Safety Categories/i.test(e.text))).toBe(false);
+  });
 });
 
 describe("cupo agotado", () => {

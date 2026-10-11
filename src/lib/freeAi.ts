@@ -13,6 +13,7 @@ import type {
 import { summarizeFileBlocks } from "../../shared/fileBlocks";
 import { sanitizeKey, splitApiKeys } from "./util";
 import { relayFetcher } from "./proxyIngest";
+import { createUnsafeGuard } from "../../shared/unsafeGuard";
 import {
   IMPROVE_CHANGE_PROMPT,
   IMPROVE_PROMPT,
@@ -902,48 +903,67 @@ async function openRouterOnce(
   let emitted = 0;
   let finish: string | null = null;
   let usage: { input: number; output: number } | undefined;
-  await midStream(
-    signal,
-    () => emitted,
-    () =>
-      readSse(
-        res,
-        (data) => {
-          if (data === "[DONE]") return;
-          let j: {
-            choices?: Array<{
-              delta?: { content?: string };
-              finish_reason?: string | null;
-            }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
-            error?: { message?: string; code?: number };
-          };
-          try {
-            j = JSON.parse(data);
-          } catch {
-            return;
-          }
-          if (j.error)
-            throw new ProviderError(
-              `OpenRouter: ${j.error.message ?? "error"}`,
-              !emitted,
-              j.error.code ?? 0,
-            );
-          const ch = j.choices?.[0];
-          if (ch?.delta?.content) {
-            emitted += ch.delta.content.length;
-            emit({ type: "text", text: ch.delta.content });
-          }
-          if (ch?.finish_reason) finish = ch.finish_reason;
-          if (j.usage)
-            usage = {
-              input: j.usage.prompt_tokens ?? 0,
-              output: j.usage.completion_tokens ?? 0,
+  let blockedUnsafe = false;
+  // Igual que puede pasar con Anthropic (ver shared/unsafeGuard.ts): algunos modelos servidos a través de
+  // OpenRouter también pueden repetir tal cual un aviso de clasificación de seguridad ("User Safety:
+  // unsafe…") de una imagen adjunta o una web marcada como peligrosa, creyendo que es contenido real. Se
+  // retiene el principio de la respuesta para comprobarlo antes de mostrarlo.
+  const unsafeGuard = createUnsafeGuard((text) => emit({ type: "text", text }));
+  try {
+    await midStream(
+      signal,
+      () => emitted,
+      () =>
+        readSse(
+          res,
+          (data) => {
+            if (data === "[DONE]") return;
+            let j: {
+              choices?: Array<{
+                delta?: { content?: string };
+                finish_reason?: string | null;
+              }>;
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
+              error?: { message?: string; code?: number };
             };
-        },
-        signal,
-      ),
-  );
+            try {
+              j = JSON.parse(data);
+            } catch {
+              return;
+            }
+            if (j.error)
+              throw new ProviderError(
+                `OpenRouter: ${j.error.message ?? "error"}`,
+                !emitted,
+                j.error.code ?? 0,
+              );
+            const ch = j.choices?.[0];
+            if (ch?.delta?.content) {
+              emitted += ch.delta.content.length;
+              if (unsafeGuard.push(ch.delta.content)) {
+                blockedUnsafe = true;
+                throw new Error("contenido marcado como peligroso por los filtros de seguridad");
+              }
+            }
+            if (ch?.finish_reason) finish = ch.finish_reason;
+            if (j.usage)
+              usage = {
+                input: j.usage.prompt_tokens ?? 0,
+                output: j.usage.completion_tokens ?? 0,
+              };
+          },
+          signal,
+        ),
+    );
+  } catch (err) {
+    if (!blockedUnsafe) throw err;
+  }
+  if (blockedUnsafe)
+    throw new ProviderError(
+      "Uno de los archivos adjuntos (imagen o captura) o la web visitada está marcado como potencialmente peligroso por los filtros de seguridad, así que no se puede continuar con esta IA. Prueba con otra captura, o con otra IA conectada.",
+      false,
+    );
+  unsafeGuard.flush();
   if (signal.aborted) throw aborted();
   if (!emitted)
     throw new ProviderError("El modelo gratuito no devolvió respuesta", true);
