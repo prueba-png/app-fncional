@@ -12,6 +12,7 @@ import { streamGemini, streamOpenRouter } from "../lib/freeAi";
 import { uid } from "../lib/util";
 import { aiAvailable, useStudio } from "./studio";
 import { FILE_CHAR_BUDGET_ANTHROPIC, FILE_CHAR_BUDGET_GEMINI, FILE_CHAR_BUDGET_OPENROUTER, filesContextChars, trimLinkedPagesForBudget } from "../../shared/prompts";
+import { UNSAFE_BLOCKED_MESSAGE_RE } from "../../shared/unsafeGuard";
 
 const HISTORY_TURNS = 12;
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -314,6 +315,14 @@ export const useChat = create<ChatState>((set, get) => ({
               onEvent,
               controller.signal,
             );
+            // Con Anthropic (directo o por el servidor), este aviso llega como un evento "error" normal
+            // (no como una excepción), así que hay que mirarlo aparte: distintos proveedores tienen
+            // clasificadores de seguridad distintos y no siempre coinciden en qué marcan como peligroso,
+            // así que merece la pena probar con el siguiente antes de rendirse.
+            if (error && UNSAFE_BLOCKED_MESSAGE_RE.test(error) && !text && i < attempts.length - 1) {
+              set({ status: `Esta IA ha marcado un archivo como peligroso; probando con otra (${attempts[i + 1].label})…` });
+              continue;
+            }
             lastErr = undefined;
             break;
           } catch (err) {
@@ -321,10 +330,15 @@ export const useChat = create<ChatState>((set, get) => ({
             if ((err as Error).name === "AbortError") throw err;
             const name = (err as Error).name;
             // Se salta al siguiente servicio con clave cuando se agotó el cupo, cuando el proyecto no cabe
-            // en el contexto de este proveedor (lo probará el siguiente, con más sitio), o cuando la red
-            // falló sin llegar a escribir nada (así no se pierde ni se duplica lo que ya se hubiera generado)
-            if ((name === "QuotaError" || name === "NetworkError" || name === "SizeError") && !text && i < attempts.length - 1) {
-              set({ status: `Cambiando a otra IA gratuita (${attempts[i + 1].label})…` });
+            // en el contexto de este proveedor (lo probará el siguiente, con más sitio), cuando la red
+            // falló sin llegar a escribir nada (así no se pierde ni se duplica lo que ya se hubiera generado),
+            // o cuando este proveedor ha marcado un archivo como peligroso (otro puede no coincidir).
+            if (
+              (name === "QuotaError" || name === "NetworkError" || name === "SizeError" || UNSAFE_BLOCKED_MESSAGE_RE.test((err as Error).message ?? "")) &&
+              !text &&
+              i < attempts.length - 1
+            ) {
+              set({ status: `Cambiando a otra IA (${attempts[i + 1].label})…` });
               continue;
             }
             throw err;
