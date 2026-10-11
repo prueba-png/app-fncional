@@ -25,8 +25,18 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
   }, [project, open]);
 
   const sizeKb = Math.round((new Blob([html]).size / 1024) * 10) / 10;
+  // Por encima de esto, copiar al portapapeles deja de ser fiable en varios navegadores (sobre todo en
+  // móvil: Safari iOS puede fallar o cortar el texto en silencio con unos cientos de KB, sin avisar de
+  // nada raro). Con un proyecto grande de verdad (un clon fiel con sus imágenes, varias páginas…) es
+  // mejor avisar y llevar a "Descargar", que escribe el archivo directamente y no tiene ese límite.
+  const TOO_BIG_TO_COPY_KB = 400;
+  const tooBigToCopy = sizeKb > TOO_BIG_TO_COPY_KB;
 
   const copy = async () => {
+    if (tooBigToCopy) {
+      toast("Este código es grande para copiarlo de forma fiable (sobre todo en el móvil: puede cortarse sin avisar). Usa «Descargar .html» y arrástralo a Netlify.", "info");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(html);
       setCopied(true);
@@ -38,12 +48,13 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
       area?.focus();
       area?.select();
       try {
-        document.execCommand("copy");
+        const ok = document.execCommand("copy");
+        if (!ok) throw new Error("execCommand devolvió false");
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
         toast("Código copiado", "success");
       } catch {
-        toast("No se pudo copiar solo. Toca el código, selecciona todo y copia.", "info");
+        toast("No se pudo copiar solo. Usa «Descargar .html» en su lugar (más fiable con código grande), o toca el código, selecciona todo y copia a mano.", "info");
       }
     }
   };
@@ -64,10 +75,10 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
           <button className="btn" onClick={onClose}>
             Cerrar
           </button>
-          <button className="btn" onClick={() => void download()}>
+          <button className={tooBigToCopy ? "btn primary" : "btn"} onClick={() => void download()}>
             <Icon name="download" /> Descargar .html
           </button>
-          <button className="btn primary" onClick={() => void copy()}>
+          <button className={tooBigToCopy ? "btn" : "btn primary"} onClick={() => void copy()} disabled={tooBigToCopy} title={tooBigToCopy ? "Código grande: usa «Descargar .html» en su lugar (más fiable)" : undefined}>
             <Icon name={copied ? "check" : "copy"} /> {copied ? "¡Copiado!" : "Copiar todo el código"}
           </button>
         </>
@@ -76,9 +87,16 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
       <p className="muted" style={{ marginTop: 0 }}>
         Todo el proyecto (HTML, estilos, JavaScript e imágenes) va dentro de este único archivo. Cópialo o descárgalo y súbelo a
         Netlify, GitHub Pages o cualquier alojamiento: funciona sin nada más. <b>{sizeKb} KB</b>.
+        {tooBigToCopy && (
+          <>
+            {" "}
+            Es un archivo grande: copiarlo puede fallar o cortarse a medias en algunos navegadores (sobre todo en el móvil), así que
+            aquí mejor usa <b>«Descargar .html»</b>.
+          </>
+        )}
       </p>
       <ol className="key-steps" style={{ marginBottom: 10 }}>
-        <li>Pulsa «Copiar todo el código» (o «Descargar .html»).</li>
+        <li>Pulsa «Descargar .html» (o «Copiar todo el código» si el archivo no es muy grande).</li>
         <li>
           En <a href="https://app.netlify.com/drop" target="_blank" rel="noreferrer noopener">app.netlify.com/drop</a> arrastra el archivo
           .html (o pégalo en un archivo <code>index.html</code>).

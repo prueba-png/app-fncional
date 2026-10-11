@@ -367,6 +367,10 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
   .result-bar .label, .change-box .label { display: none; }
   .change-box .btn.big { padding: 0 14px; }
   .easy-input-row .btn.big { flex: none; }
+  /* En pantallas estrechas, un mensaje largo (p. ej. el aviso de proyecto demasiado grande) no deja sitio
+     a los botones en la misma línea: antes se quedaban apretados en una columna vertical muy estrecha
+     junto al texto. Forzando el texto a su propia línea, los botones caen debajo ya en una fila horizontal. */
+  .change-status > span { flex-basis: 100%; }
 }
 
 /* ── Pantallas táctiles ─────────────────────────────────── */
