@@ -105,6 +105,12 @@ describe("corrección automática de una reescritura destructiva (antes de aplic
     const lastMsg = useChat.getState().messages.at(-1);
     expect(lastMsg?.meta?.error).toBeUndefined();
     expect(lastMsg?.meta?.warning).toMatch(/no se toc|reescrib/i);
+    // El fichero descartado no debe contar como "cambiado": ni en la lista de chips del mensaje
+    // (contradiría el propio aviso, que dice que ese fichero no se tocó) ni en el aviso de éxito.
+    expect(lastMsg?.meta?.changed).toEqual(["index.html"]);
+    const toasts = useStudio.getState().toasts;
+    expect(toasts.some((t) => /aplicado/i.test(t.message) && /\b1\b/.test(t.message))).toBe(true);
+    expect(toasts.some((t) => /aplicado/i.test(t.message) && /\b2\b/.test(t.message))).toBe(false);
   });
 
   it("un cambio normal que SÍ conserva el fichero no dispara ninguna corrección (una sola llamada)", async () => {
