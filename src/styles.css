@@ -82,6 +82,11 @@ code, pre, kbd { font-family: var(--mono); }
 .btn.sm { height: 24px; padding: 0 7px; font-size: 12px; }
 .btn.icon { width: 30px; padding: 0; justify-content: center; }
 .btn.sm.icon { width: 24px; }
+/* .btn.big (más abajo) pone su propio padding horizontal, que si no se pisara aquí dejaría estos
+   botones con más padding que ancho total: el icono (un SVG con flex-shrink por defecto) se encogía
+   hasta desaparecer del todo (ancho 0), aunque el botón en sí se viera bien. Pasaba con «Añadir imagen»,
+   «Hablar en vez de escribir» (micrófono) e «Idealizar el cambio» en la pantalla de resultado. */
+.btn.big.icon { width: 44px; padding: 0; }
 .btn.mic-on { background: var(--danger); border-color: var(--danger); color: #fff; animation: mic-pulse 1.1s ease-in-out infinite; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
 .btn:focus-visible, .input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
