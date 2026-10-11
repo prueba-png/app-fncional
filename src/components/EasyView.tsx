@@ -1000,6 +1000,11 @@ function ResultScreen() {
                 </button>
               )
             )}
+            {lastAi.meta?.error && /añade una clave gratuita de google/i.test(lastAi.meta.error) && (
+              <button className="btn sm primary" onClick={() => useStudio.getState().setSettingsOpen(true)}>
+                <Icon name="settings" size={12} /> Añadir clave de Google
+              </button>
+            )}
             {undoTarget && (
               <button className="btn sm" onClick={() => void restoreVersion(undoTarget.id)}>
                 <Icon name="history" size={12} /> Deshacer

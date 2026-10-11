@@ -102,7 +102,7 @@ export function SettingsDialog() {
         Inteligencia artificial
       </div>
       <label className="field">
-        <span>¿Qué IA quieres usar?</span>
+        <span>¿Qué IA prefieres probar primero?</span>
         <select
           className="select"
           value={draft.aiProvider}
@@ -116,185 +116,156 @@ export function SettingsDialog() {
           </option>
           <option value="anthropic">Anthropic Claude — de pago</option>
         </select>
+        <small>
+          Puedes añadir la clave de más de una aquí abajo: si la que elijas aquí se queda sin cupo, la app prueba sola con la siguiente que tenga clave guardada.
+        </small>
       </label>
-      {draft.aiProvider === "gemini" && (
-        <label className="field">
-          <span>Clave gratuita de Google</span>
-          <div className="row">
-            <input
-              className="input mono"
-              type={showKey ? "text" : "password"}
-              autoComplete="off"
-              placeholder="AIza… o AQ… (puedes pegar varias separadas por comas)"
-              value={draft.geminiApiKey}
-              onChange={(e) => set("geminiApiKey", e.target.value)}
-            />
-            <button
-              className="btn icon"
-              type="button"
-              onClick={() => setShowKey((s) => !s)}
-              aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
-            >
-              <Icon name="eye" />
-            </button>
-          </div>
-          <small>
-            Gratis y sin tarjeta: entra en{" "}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              aistudio.google.com/apikey
-            </a>{" "}
-            con tu cuenta de Google y pulsa «Create API key». Se guarda solo en
-            este navegador. Cada clave tiene su propio cupo diario: si pegas
-            varias aquí separadas por comas (de cuentas de Google distintas),
-            la app se turna sola entre ellas cuando una se queda sin cupo.
-          </small>
-        </label>
-      )}
-      {draft.aiProvider === "openrouter" && (
-        <label className="field">
-          <span>Clave gratuita de OpenRouter</span>
-          <div className="row">
-            <input
-              className="input mono"
-              type={showKey ? "text" : "password"}
-              autoComplete="off"
-              placeholder="sk-or-…"
-              value={draft.openrouterApiKey}
-              onChange={(e) => set("openrouterApiKey", e.target.value)}
-            />
-            <button
-              className="btn icon"
-              type="button"
-              onClick={() => setShowKey((s) => !s)}
-              aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
-            >
-              <Icon name="eye" />
-            </button>
-          </div>
-          <small>
-            Gratis y sin tarjeta: crea una cuenta en{" "}
-            <a
-              href="https://openrouter.ai/keys"
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              openrouter.ai/keys
-            </a>{" "}
-            y crea una clave. Solo se usan sus modelos gratuitos (límite de 50
-            peticiones al día).
-          </small>
-        </label>
-      )}
+      <label className="field">
+        <span>Clave gratuita de Google (Gemini)</span>
+        <div className="row">
+          <input
+            className="input mono"
+            type={showKey ? "text" : "password"}
+            autoComplete="off"
+            placeholder="AIza… o AQ… (puedes pegar varias separadas por comas)"
+            value={draft.geminiApiKey}
+            onChange={(e) => set("geminiApiKey", e.target.value)}
+          />
+          <button
+            className="btn icon"
+            type="button"
+            onClick={() => setShowKey((s) => !s)}
+            aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+          >
+            <Icon name="eye" />
+          </button>
+        </div>
+        <small>
+          Gratis y sin tarjeta: entra en{" "}
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            aistudio.google.com/apikey
+          </a>{" "}
+          con tu cuenta de Google y pulsa «Create API key». Se guarda solo en
+          este navegador. Cada clave tiene su propio cupo diario: si pegas
+          varias aquí separadas por comas (de cuentas de Google distintas),
+          la app se turna sola entre ellas cuando una se queda sin cupo. Es la que más sitio admite (hasta 1.500.000 caracteres), así que vale la pena tenerla puesta aunque uses otra IA como principal.
+        </small>
+      </label>
+      <label className="field">
+        <span>Clave gratuita de OpenRouter</span>
+        <div className="row">
+          <input
+            className="input mono"
+            type={showKey ? "text" : "password"}
+            autoComplete="off"
+            placeholder="sk-or-…"
+            value={draft.openrouterApiKey}
+            onChange={(e) => set("openrouterApiKey", e.target.value)}
+          />
+          <button
+            className="btn icon"
+            type="button"
+            onClick={() => setShowKey((s) => !s)}
+            aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+          >
+            <Icon name="eye" />
+          </button>
+        </div>
+        <small>
+          Gratis y sin tarjeta: crea una cuenta en{" "}
+          <a
+            href="https://openrouter.ai/keys"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            openrouter.ai/keys
+          </a>{" "}
+          y crea una clave. Solo se usan sus modelos gratuitos (límite de 50
+          peticiones al día).
+        </small>
+      </label>
+      <label className="field">
+        <span>Clave de API de Anthropic (de pago)</span>
+        <div className="row">
+          <input
+            className="input mono"
+            type={showKey ? "text" : "password"}
+            autoComplete="off"
+            placeholder={
+              health?.hasEnvApiKey
+                ? "Usando ANTHROPIC_API_KEY del servidor"
+                : "sk-ant-…"
+            }
+            value={draft.anthropicApiKey}
+            onChange={(e) => set("anthropicApiKey", e.target.value)}
+          />
+          <button
+            className="btn icon"
+            type="button"
+            onClick={() => setShowKey((s) => !s)}
+            aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+          >
+            <Icon name="eye" />
+          </button>
+        </div>
+        <small>
+          Cada clon cuesta unos céntimos de tu saldo. Consíguela en{" "}
+          <a
+            href="https://console.anthropic.com/settings/keys"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            console.anthropic.com
+          </a>
+          .
+        </small>
+      </label>
       {draft.aiProvider === "anthropic" && (
-        <>
-          <label className="field">
-            <span>Clave de API de Anthropic (de pago)</span>
-            <div className="row">
-              <input
-                className="input mono"
-                type={showKey ? "text" : "password"}
-                autoComplete="off"
-                placeholder={
-                  health?.hasEnvApiKey
-                    ? "Usando ANTHROPIC_API_KEY del servidor"
-                    : "sk-ant-…"
-                }
-                value={draft.anthropicApiKey}
-                onChange={(e) => set("anthropicApiKey", e.target.value)}
-              />
-              <button
-                className="btn icon"
-                type="button"
-                onClick={() => setShowKey((s) => !s)}
-                aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
-              >
-                <Icon name="eye" />
-              </button>
-            </div>
-            <small>
-              Cada clon cuesta unos céntimos de tu saldo. Consíguela en{" "}
-              <a
-                href="https://console.anthropic.com/settings/keys"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                console.anthropic.com
-              </a>
-              .
-            </small>
-          </label>
-          <div className="row">
-            <label className="field grow">
-              <span>Modelo</span>
-              <select
-                className="select"
-                value={draft.model}
-                onChange={(e) => set("model", e.target.value)}
-              >
-                {MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-                {!MODELS.some((m) => m.id === draft.model) && (
-                  <option value={draft.model}>{draft.model}</option>
-                )}
-              </select>
-            </label>
-            <label className="field" style={{ width: 150 }}>
-              <span>Esfuerzo</span>
-              <select
-                className="select"
-                value={draft.effort}
-                onChange={(e) =>
-                  set("effort", e.target.value as Settings["effort"])
-                }
-                disabled={draft.model.startsWith("claude-haiku")}
-              >
-                <option value="low">Bajo</option>
-                <option value="medium">Medio</option>
-                <option value="high">Alto</option>
-                <option value="xhigh">Muy alto</option>
-                <option value="max">Máximo</option>
-              </select>
-            </label>
-          </div>
-        </>
-      )}
-      {draft.aiProvider !== "gemini" && !speechSupported && mediaRecorderSupported && (
-        <label className="field">
-          <span>Clave gratuita de Google (para el dictado por voz)</span>
-          <div className="row">
-            <input
-              className="input mono"
-              type={showKey ? "text" : "password"}
-              autoComplete="off"
-              placeholder="AIza… o AQ…"
-              value={draft.geminiApiKey}
-              onChange={(e) => set("geminiApiKey", e.target.value)}
-            />
-            <button
-              className="btn icon"
-              type="button"
-              onClick={() => setShowKey((s) => !s)}
-              aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+        <div className="row">
+          <label className="field grow">
+            <span>Modelo</span>
+            <select
+              className="select"
+              value={draft.model}
+              onChange={(e) => set("model", e.target.value)}
             >
-              <Icon name="eye" />
-            </button>
-          </div>
-          <small>
-            Este navegador (Safari) no trae dictado por voz propio, así que el botón del micrófono graba tu voz y la transcribe con Google
-            Gemini. Gratis y sin tarjeta: entra en{" "}
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer noopener">
-              aistudio.google.com/apikey
-            </a>{" "}
-            con tu cuenta de Google y pulsa «Create API key».
-          </small>
-        </label>
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+              {!MODELS.some((m) => m.id === draft.model) && (
+                <option value={draft.model}>{draft.model}</option>
+              )}
+            </select>
+          </label>
+          <label className="field" style={{ width: 150 }}>
+            <span>Esfuerzo</span>
+            <select
+              className="select"
+              value={draft.effort}
+              onChange={(e) =>
+                set("effort", e.target.value as Settings["effort"])
+              }
+              disabled={draft.model.startsWith("claude-haiku")}
+            >
+              <option value="low">Bajo</option>
+              <option value="medium">Medio</option>
+              <option value="high">Alto</option>
+              <option value="xhigh">Muy alto</option>
+              <option value="max">Máximo</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {!speechSupported && mediaRecorderSupported && !draft.geminiApiKey && (
+        <p className="muted small">
+          Este navegador (Safari) no trae dictado por voz propio: el botón del micrófono graba tu voz y la transcribe con Google Gemini, así que añade la clave de Google de arriba para poder dictar.
+        </p>
       )}
 
       <div className="section-title">Clonar por enlace (tu servidor de descarga)</div>
