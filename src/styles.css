@@ -360,17 +360,17 @@ button.logo { background: none; border: 0; padding: 0; color: inherit; cursor: p
 .result-preview { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .change-box { border-top: 1px solid var(--border); background: var(--bg-2); padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; flex: none; }
 .change-status { align-items: center; }
-.change-status > span { flex: 1; min-width: 0; }
+/* El texto (p. ej. el aviso de proyecto demasiado grande) siempre ocupa su propia línea completa: así,
+   con el contenedor en flex-wrap, los botones («Reintentar», «Añadir clave de Google»…) caen siempre
+   debajo en su propia fila horizontal, en vez de quedar apretados en una columna junto a un texto largo
+   (pasaba tanto en pantallas estrechas como anchas: no dependía solo del ancho de la ventana). */
+.change-status > span { flex-basis: 100%; min-width: 0; }
 
 @media (max-width: 760px) {
   .result-bar { padding: 6px 8px; gap: 6px; }
   .result-bar .label, .change-box .label { display: none; }
   .change-box .btn.big { padding: 0 14px; }
   .easy-input-row .btn.big { flex: none; }
-  /* En pantallas estrechas, un mensaje largo (p. ej. el aviso de proyecto demasiado grande) no deja sitio
-     a los botones en la misma línea: antes se quedaban apretados en una columna vertical muy estrecha
-     junto al texto. Forzando el texto a su propia línea, los botones caen debajo ya en una fila horizontal. */
-  .change-status > span { flex-basis: 100%; }
 }
 
 /* ── Pantallas táctiles ─────────────────────────────────── */
