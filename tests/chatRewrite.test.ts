@@ -26,6 +26,17 @@ function fileResponse(path: string, content: string) {
   };
 }
 
+/** Emite varios <file> a la vez en una sola respuesta. */
+function multiFileResponse(files: Record<string, string>) {
+  return async (_req: unknown, onEvent: (e: { type: string; text?: string; model?: string }) => void) => {
+    const text = Object.entries(files)
+      .map(([p, c]) => `<file path="${p}">${c}</file>`)
+      .join("\n");
+    onEvent({ type: "text", text });
+    onEvent({ type: "done", model: "gemini-flash-latest (gratis)", stopReason: "end_turn" });
+  };
+}
+
 /** Emite texto en bruto (para simular un trozo de un <file> a medio terminar o su continuación). */
 function textChunk(text: string, stopReason: string | null = "end_turn") {
   return async (_req: unknown, onEvent: (e: { type: string; text?: string; model?: string; stopReason?: string | null }) => void) => {
@@ -56,7 +67,7 @@ describe("corrección automática de una reescritura destructiva (antes de aplic
     expect(lastMsg?.meta?.warning).toBeUndefined(); // se corrigió sola: no hace falta avisar
   });
 
-  it("si la corrección automática TAMBIÉN reescribe casi todo, se avisa (como antes) y se deja la primera versión aplicada", async () => {
+  it("si la corrección automática TAMBIÉN reescribe casi todo, no se aplica nada (mejor que perder lo que ya había) y lo dice claro", async () => {
     await setUpProject();
     const destructive1 = "body { all: unset; }";
     const destructive2 = ".otra-cosa { background: red; }"; // la "corrección" sigue sin conservar el original
@@ -68,9 +79,32 @@ describe("corrección automática de una reescritura destructiva (antes de aplic
 
     expect(streamGemini).toHaveBeenCalledTimes(2);
     const files = useStudio.getState().project!.files;
-    expect(files["styles.css"]).toBe(destructive1); // no se queda con una corrección que no corrigió nada
+    // Ni la destructiva original ni la "corrección" (que seguía sin conservar el original) llegan a aplicarse:
+    // el fichero se deja exactamente como estaba, en vez de arriesgarse a perder su contenido.
+    expect(files["styles.css"]).toBe(ORIGINAL_CSS);
     const lastMsg = useChat.getState().messages.at(-1);
-    expect(lastMsg?.meta?.warning).toMatch(/reescrito/i);
+    expect(lastMsg?.meta?.error).toMatch(/no se aplic|reescrib/i);
+    expect(lastMsg?.meta?.warning).toBeUndefined();
+  });
+
+  it("si solo UN fichero sigue siendo destructivo tras corregirlo, se deja tal cual pero los demás cambios reales sí se aplican (aviso, no error)", async () => {
+    await setUpProject();
+    const destructive1 = "body { all: unset; }";
+    const destructive2 = ".otra-cosa { background: red; }"; // sigue sin conservar el original
+    const newHtml = "<button>Entrar</button>";
+    streamGemini
+      .mockImplementationOnce(multiFileResponse({ "index.html": newHtml, "styles.css": destructive1 }))
+      .mockImplementationOnce(fileResponse("styles.css", destructive2));
+
+    await useChat.getState().send("cambia el texto del botón y pon el color en verde");
+
+    expect(streamGemini).toHaveBeenCalledTimes(2);
+    const files = useStudio.getState().project!.files;
+    expect(files["index.html"]).toBe(newHtml); // el cambio real (y seguro) sí se aplicó
+    expect(files["styles.css"]).toBe(ORIGINAL_CSS); // el que seguía siendo destructivo se dejó tal cual
+    const lastMsg = useChat.getState().messages.at(-1);
+    expect(lastMsg?.meta?.error).toBeUndefined();
+    expect(lastMsg?.meta?.warning).toMatch(/no se toc|reescrib/i);
   });
 
   it("un cambio normal que SÍ conserva el fichero no dispara ninguna corrección (una sola llamada)", async () => {

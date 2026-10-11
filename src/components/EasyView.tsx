@@ -993,7 +993,7 @@ function ResultScreen() {
               </button>
             ) : (
               lastAi.meta?.error &&
-              !lastAi.meta?.changed?.length &&
+              !lastAi.meta?.versionId &&
               lastUserPrompt && (
                 <button className="btn sm primary" onClick={() => void resendLastUser("retry")}>
                   <Icon name="refresh" size={12} /> Reintentar

@@ -482,6 +482,8 @@ export const useChat = create<ChatState>((set, get) => ({
     const stillSameProject = useStudio.getState().project?.id === project.id;
     const changed = Object.keys(parsed.updated);
     let versionId: string | undefined;
+    /** Rutas que no se llegaron a aplicar porque la IA seguía reescribiéndolas de más, incluso tras corregirlo. */
+    let discardedPaths: string[] = [];
     if (stillSameProject && (changed.length || parsed.deleted.length)) {
       // Repone los datos reales que se omitieron del envío (fuentes/imágenes incrustadas), si el fichero
       // volvió sin tocar esa parte; si la IA sí la cambió, ya no queda el marcador y no se repone nada.
@@ -573,8 +575,15 @@ export const useChat = create<ChatState>((set, get) => ({
           /* si la corrección falla, se sigue con la versión original (se avisará más abajo como antes) */
         }
       }
-      let v = await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai");
-      if (!v && !controller.signal.aborted) {
+      // Si, pese a la corrección automática de arriba, SIGUE reescribiendo la mayor parte de un fichero que
+      // ya existía, ese fichero no se aplica en absoluto (se deja tal cual estaba): forzar una reescritura
+      // que ya ha fallado dos veces hace más mal que bien, y el usuario siempre acababa pulsando «Deshacer»
+      // de todas formas. Si había otros ficheros con un cambio real y seguro, esos sí se aplican normalmente.
+      discardedPaths = overwrittenPaths(toWrite);
+      for (const p of discardedPaths) delete toWrite[p];
+
+      let v = Object.keys(toWrite).length || toDelete.length ? await useStudio.getState().applyChanges(toWrite, toDelete, `IA: ${userMsg.content.slice(0, 80)}`, "ai") : null;
+      if (!v && !controller.signal.aborted && !discardedPaths.length) {
         // El fichero que devolvió la IA es BYTE A BYTE idéntico al que ya había (formato correcto, pero
         // ningún cambio real): sin esto, el chat decía "Aplicados N cambios" aunque la vista previa se
         // quedara exactamente igual. Se le pide una vez que identifique de verdad qué había que cambiar.
@@ -652,6 +661,11 @@ export const useChat = create<ChatState>((set, get) => ({
       // Ni la respuesta original ni el reintento trajeron ficheros: se avisa en vez de dejar un "cambio
       // fantasma" (la IA contesta con texto, pero la vista previa sigue exactamente igual que antes).
       error = "La IA respondió con texto pero no llegó a escribir el código del cambio. Prueba a pedirlo de nuevo, quizá con otras palabras.";
+    } else if (!error && discardedPaths.length && !versionId) {
+      // Lo único que devolvió la IA era una reescritura destructiva (ver más abajo): no se aplicó nada a
+      // propósito, para no arriesgarse a perder lo que ya había. Mensaje específico, no el genérico de
+      // "sin cambio real" (aquí el motivo es justo lo contrario: cambiaba demasiado, no demasiado poco).
+      error = `${discardedPaths.length === 1 ? `${discardedPaths[0]} no se aplicó` : `${discardedPaths.join(", ")} no se aplicaron`} porque la IA seguía reescribiendo la mayor parte de su contenido anterior en vez de tocar solo lo pedido, incluso después de pedirle que lo corrigiera. Para no arriesgarse a perder lo que ya tenías, se ha dejado tal cual estaba. Prueba a pedirlo de forma más concreta (p. ej. nombrando el elemento exacto que quieres cambiar).`;
     } else if (!error && (changed.length || parsed.deleted.length) && !versionId) {
       // Se devolvieron ficheros con el formato correcto, pero ni la respuesta original ni el reintento
       // cambiaron nada respecto a lo que ya había: se avisa en vez de decir "Aplicados" sin ser cierto.
@@ -663,7 +677,11 @@ export const useChat = create<ChatState>((set, get) => ({
     // "haz funcional el selector de idioma" y la IA reconstruye el formulario entero de memoria en vez de
     // solo añadirle el código que faltaba). No se avisa si el usuario pidió un rediseño completo.
     let warning: string | undefined;
-    if (versionId) {
+    if (versionId && discardedPaths.length) {
+      // Se aplicaron otros cambios reales, pero este fichero en concreto se dejó tal cual (ver el error de
+      // arriba para el caso en que NO hubiera ningún otro cambio que aplicar).
+      warning = `${discardedPaths.length === 1 ? `${discardedPaths[0]} no se tocó` : `${discardedPaths.join(", ")} no se tocaron`} porque la IA seguía reescribiendo la mayor parte de su contenido anterior en vez de solo lo pedido: se ha dejado tal cual estaba. El resto de cambios sí se aplicó. Prueba a pedir ese cambio por separado, de forma más concreta.`;
+    } else if (versionId) {
       const afterFiles = useStudio.getState().project?.files ?? {};
       const changedAfter = Object.fromEntries(changed.filter((p) => p in afterFiles).map((p) => [p, afterFiles[p]]));
       const rewritten = overwrittenPaths(changedAfter);
