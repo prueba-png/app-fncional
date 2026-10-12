@@ -73,9 +73,39 @@ function scoreGeminiModel(id: string): number {
 }
 
 /**
+ * Para "Idealizar" (reescribir una idea o un cambio en una frase más precisa, sin generar código):
+ * no hace falta el modelo más nuevo y potente, solo que responda rápido, y el usuario revisa el
+ * resultado igualmente. `scoreGeminiModel` prioriza la versión más alta por encima de todo lo demás,
+ * así que con el tiempo puede elegir un modelo "preview" (versión experimental, con menos capacidad y
+ * más posibilidades de estar saturado) en vez del "lite" estable pensado para ser el más ligero y
+ * rápido: por eso aquí se usa un criterio distinto, que prioriza "lite" y evita los "preview".
+ */
+function scoreGeminiModelFast(id: string): number {
+  const lite = /lite/i.test(id) ? 1 : 0;
+  const latest = /-latest$/.test(id) ? 1 : 0;
+  const stable = /preview|exp|thinking/i.test(id) ? 0 : 1;
+  return lite * 100 + latest * 20 + stable * 10;
+}
+
+/** Modos de "Idealizar": piden una frase corta, no código, así que conviene el modelo más rápido. */
+function isQuickMode(mode: ChatRequest["mode"]): boolean {
+  return mode === "improve-prompt" || mode === "improve-change";
+}
+
+/**
  * Pregunta a Google qué modelos puede usar esta clave y elige los «flash» (los del plan gratuito),
  * del más nuevo al más ligero. Así la app usa siempre los últimos modelos sin tener que actualizarse.
  */
+/**
+ * Adelanta la consulta de qué modelos admite esta clave (normalmente solo se hace, y se tarda, la
+ * primera vez que se usa la IA en la sesión). Pensada para lanzarse en segundo plano nada más abrir la
+ * app (si ya hay una clave de Google guardada), para que la primera petición real del usuario —a
+ * menudo "Idealizar", que se espera que sea rápida— no tenga que esperar también a esta consulta.
+ */
+export function prefetchGeminiModels(apiKey: string): void {
+  for (const key of splitApiKeys(apiKey)) void discoverGeminiModels(key);
+}
+
 async function discoverGeminiModels(apiKey: string): Promise<string[]> {
   const cached = geminiModelCache.get(apiKey);
   if (cached) return cached;
@@ -571,7 +601,9 @@ async function streamGeminiWithKey(
   let lastQuotaEscalated = false;
   let last: unknown;
   // Se usan los modelos que la propia cuenta tiene disponibles (siempre los últimos), no una lista fija
-  const models = await discoverGeminiModels(apiKey);
+  const discovered = await discoverGeminiModels(apiKey);
+  // Para "Idealizar" (ver scoreGeminiModelFast) se reordena para probar primero el modelo más rápido
+  const models = isQuickMode(req.mode) ? [...discovered].sort((a, b) => scoreGeminiModelFast(b) - scoreGeminiModelFast(a)) : discovered;
   // Si todos los modelos de ESTA clave agotaron su cupo hace poco, no se reintentan con ella
   const rested = models.filter((m) => (exhaustedUntil.get(`${apiKey}:${m}`) ?? 0) < Date.now()).slice(0, 5);
   if (!rested.length) return { limit: true, daily: true, escalated: false, last: undefined };

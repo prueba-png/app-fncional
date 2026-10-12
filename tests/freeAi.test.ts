@@ -143,6 +143,34 @@ describe("IA gratuita", () => {
     });
     expect(events.some((e) => e.type === "text" && /User Safety|Safety Categories/i.test(e.text))).toBe(false);
   });
+
+  it("Gemini: «Idealizar» (improve-prompt/improve-change) prueba primero el modelo «lite» más rápido, no el de versión más alta", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      // Entre los modelos descubiertos hay uno "preview" con versión más alta (el que se elegiría
+      // normalmente, ver scoreGeminiModel) y uno "lite-latest" (más ligero, pensado para ser rápido).
+      if (isDiscovery(url)) return modelList("gemini-3-flash-preview", "gemini-flash-lite-latest");
+      const model = url.match(/models\/([^:]+):/)![1];
+      seen.push(model);
+      return sse([{ candidates: [{ content: { parts: [{ text: "idea mejorada" }] }, finishReason: "STOP" }] }]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamGemini({ ...makeReq("k-idealizar"), mode: "improve-prompt", attachments: undefined }, (e) => events.push(e), new AbortController().signal);
+    expect(seen[0]).toBe("gemini-flash-lite-latest");
+  });
+
+  it("Gemini: un cambio normal (no «Idealizar») sigue probando el modelo de versión más alta primero", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (isDiscovery(url)) return modelList("gemini-3-flash-preview", "gemini-flash-lite-latest");
+      const model = url.match(/models\/([^:]+):/)![1];
+      seen.push(model);
+      return sse([{ candidates: [{ content: { parts: [{ text: '<file path="index.html">ok</file>' }] }, finishReason: "STOP" }] }]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamGemini(makeReq("k-normal"), (e) => events.push(e), new AbortController().signal);
+    expect(seen[0]).toBe("gemini-3-flash-preview");
+  });
 });
 
 describe("cupo agotado", () => {

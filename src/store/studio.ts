@@ -4,6 +4,7 @@ import { sanitizePath } from "../../shared/fileBlocks";
 import * as db from "../db/db";
 import type { Project, Settings, Version, VersionSource } from "../db/db";
 import { health, setServerless, type HealthInfo } from "../lib/api";
+import { prefetchGeminiModels } from "../lib/freeAi";
 import { setProxyUrl } from "../lib/proxyIngest";
 import { canSaveFiles, getSample, hasViewerRuntime, sampleSupportsImages } from "../lib/runtime";
 import { TEMPLATES } from "../lib/templates";
@@ -179,6 +180,9 @@ export const useStudio = create<StudioState>((set, get) => {
       void db.requestPersistentStorage();
       set({ settings, projects, health: h, ai: h ? (h.llm === false ? "direct" : "server") : "none" });
       setProxyUrl(settings.proxyUrl);
+      // Adelanta en segundo plano la consulta de qué modelos de Google admite la clave, para que la
+      // primera petición real (a menudo "Idealizar", que se espera rápida) no tenga que esperarla también.
+      if (settings.geminiApiKey) prefetchGeminiModels(settings.geminiApiKey);
       if (!h && !hasViewerRuntime()) {
         // Versión de un solo archivo en cualquier alojamiento: todo ocurre en el navegador
         setServerless(true);
@@ -238,6 +242,7 @@ export const useStudio = create<StudioState>((set, get) => {
     async updateSettings(patch) {
       set({ settings: { ...get().settings, ...patch } });
       if (patch.proxyUrl !== undefined) setProxyUrl(patch.proxyUrl);
+      if (patch.geminiApiKey) prefetchGeminiModels(patch.geminiApiKey);
       await db.saveSettings(patch);
     },
 

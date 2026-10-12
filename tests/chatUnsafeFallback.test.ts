@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // clasificadores de seguridad distintos y no siempre coinciden en qué marcan como peligroso.
 const streamGemini = vi.fn();
 const streamOpenRouter = vi.fn();
-vi.mock("../src/lib/freeAi", () => ({ streamGemini, streamOpenRouter, transcribeAudio: vi.fn() }));
+vi.mock("../src/lib/freeAi", () => ({ streamGemini, streamOpenRouter, transcribeAudio: vi.fn(), prefetchGeminiModels: vi.fn() }));
 
 const { useStudio } = await import("../src/store/studio");
 const { useChat } = await import("../src/store/chat");

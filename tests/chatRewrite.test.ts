@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // la segunda llamada (la corrección automática que ahora se pide sola) puede sanar el resultado o no,
 // según lo que configure cada test.
 const streamGemini = vi.fn();
-vi.mock("../src/lib/freeAi", () => ({ streamGemini, streamOpenRouter: vi.fn(), transcribeAudio: vi.fn() }));
+vi.mock("../src/lib/freeAi", () => ({ streamGemini, streamOpenRouter: vi.fn(), transcribeAudio: vi.fn(), prefetchGeminiModels: vi.fn() }));
 
 const { useStudio } = await import("../src/store/studio");
 const { useChat } = await import("../src/store/chat");
