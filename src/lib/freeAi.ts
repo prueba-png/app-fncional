@@ -83,22 +83,31 @@ export const GEMINI_MODELS = [
 /** Modelos descubiertos por clave (se consulta una vez por sesión). */
 const geminiModelCache = new Map<string, string[]>();
 
-/** Puntúa un modelo flash para elegir el más nuevo y capaz primero. */
+/**
+ * Puntúa un modelo flash para elegir el más nuevo y capaz primero, PERO sin que eso signifique nunca
+ * elegir uno "preview"/experimental por delante de un alias "-latest" estable: antes, el número de
+ * versión (p. ej. el "3" de "gemini-3-flash-preview") pesaba tanto (×100) que ganaba a cualquier alias
+ * "-latest" (que no tiene número de versión en el nombre, así que contaba como versión 0) aunque ese
+ * alias fuera la opción estable y ese otro fuera justo la experimental, penalizada por "stable" con solo
+ * 1 punto: en la práctica, "stable" no servía de nada. Un modelo "preview" suele estar más solicitado
+ * (todo el mundo probando lo último) y ser menos fiable en el plan gratuito, así que acababa haciendo
+ * más lento justo lo que se pedía que fuera rápido: clonar, crear o aplicar un cambio. Ahora la
+ * estabilidad pesa mucho más que la versión; esta última solo desempata entre modelos igual de estables.
+ */
 function scoreGeminiModel(id: string): number {
   const ver = parseFloat(id.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? "0");
   const latest = /-latest$/.test(id) ? 1 : 0; // los alias «latest» no caducan
   const full = /lite/i.test(id) ? 0 : 1; // «flash» algo mejor que «flash-lite»
   const stable = /preview|exp|thinking/i.test(id) ? 0 : 1;
-  return ver * 100 + latest * 20 + full * 5 + stable;
+  return stable * 1000 + latest * 50 + full * 10 + ver;
 }
 
 /**
  * Para "Idealizar" (reescribir una idea o un cambio en una frase más precisa, sin generar código):
  * no hace falta el modelo más nuevo y potente, solo que responda rápido, y el usuario revisa el
- * resultado igualmente. `scoreGeminiModel` prioriza la versión más alta por encima de todo lo demás,
- * así que con el tiempo puede elegir un modelo "preview" (versión experimental, con menos capacidad y
- * más posibilidades de estar saturado) en vez del "lite" estable pensado para ser el más ligero y
- * rápido: por eso aquí se usa un criterio distinto, que prioriza "lite" y evita los "preview".
+ * resultado igualmente. `scoreGeminiModel` ya evita los "preview" (ver su comentario), pero entre dos
+ * modelos igual de estables prefiere el normal («flash») al «lite»: para un cambio de verdad eso tiene
+ * sentido, pero aquí lo que más importa es la velocidad, así que se prioriza justo lo contrario.
  */
 function scoreGeminiModelFast(id: string): number {
   const lite = /lite/i.test(id) ? 1 : 0;

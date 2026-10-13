@@ -187,17 +187,22 @@ describe("IA gratuita", () => {
     expect(seen[0]).toBe("gemini-flash-lite-latest");
   });
 
-  it("Gemini: un cambio normal (no «Idealizar») sigue probando el modelo de versión más alta primero", async () => {
+  it("Gemini: un cambio normal (no «Idealizar») prefiere el «flash» estable (-latest) antes que uno «preview» con versión más alta", async () => {
+    // Antes, el número de versión pesaba tanto que un modelo "preview" (experimental, penalizado por no
+    // ser estable) ganaba de todas formas a cualquier alias "-latest": esto afectaba a CUALQUIER petición
+    // (clonar por enlace, por captura, crear desde cero, aplicar un cambio), no solo a "Idealizar", y era
+    // una causa real de que todo fuera más lento de lo necesario (los "preview" suelen estar más
+    // solicitados y ser menos fiables en el plan gratuito).
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
-      if (isDiscovery(url)) return modelList("gemini-3-flash-preview", "gemini-flash-lite-latest");
+      if (isDiscovery(url)) return modelList("gemini-3-flash-preview", "gemini-flash-lite-latest", "gemini-flash-latest");
       const model = url.match(/models\/([^:]+):/)![1];
       seen.push(model);
       return sse([{ candidates: [{ content: { parts: [{ text: '<file path="index.html">ok</file>' }] }, finishReason: "STOP" }] }]);
     });
     const events: ChatStreamEvent[] = [];
     await streamGemini(makeReq("k-normal"), (e) => events.push(e), new AbortController().signal);
-    expect(seen[0]).toBe("gemini-3-flash-preview");
+    expect(seen[0]).toBe("gemini-flash-latest");
   });
 });
 
