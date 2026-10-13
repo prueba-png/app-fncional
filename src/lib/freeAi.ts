@@ -50,6 +50,26 @@ export function connectTimeout(signal: AbortSignal, ms = CONNECT_TIMEOUT_MS): { 
   return { signal: ac.signal, clear: () => clearTimeout(timer) };
 }
 
+/** Tope de tiempo total (conectar + todo el streaming) para no quedarse cargando sin límite para siempre. */
+const OVERALL_RESPONSE_MAX_MS = 90_000;
+
+/**
+ * A diferencia de `connectTimeout` (que solo vigila que llegue respuesta) y del vigilante de «conexión
+ * colgada» de `readSse` (que solo salta si hay SILENCIO total un rato), esto pone un límite al tiempo
+ * TOTAL de toda la respuesta, conectar incluido. Hace falta porque un modelo gratuito muy saturado puede
+ * ir goteando algún dato de cuando en cuando —sin llegar nunca al silencio que activaría el otro
+ * vigilante— y aun así tardar muchísimos minutos en terminar de responder, con la pantalla cargando todo
+ * ese tiempo sin ningún aviso ni cambio. Pasado este tiempo se corta esa tanda y se prueba con otro
+ * modelo o proveedor, igual que si se hubiera perdido la conexión.
+ */
+export function overallResponseCap(signal: AbortSignal, ms = OVERALL_RESPONSE_MAX_MS): { signal: AbortSignal; clear: () => void } {
+  const ac = new AbortController();
+  if (signal.aborted) ac.abort(signal.reason);
+  signal.addEventListener("abort", () => ac.abort(signal.reason));
+  const timer = setTimeout(() => ac.abort(new DOMException("Ha tardado demasiado sin terminar de responder", "TimeoutError")), ms);
+  return { signal: ac.signal, clear: () => clearTimeout(timer) };
+}
+
 /**
  * Lista de reserva por si no se puede consultar el catálogo. Los alias «-latest» apuntan siempre
  * al modelo actual, así que no hay que actualizarlos cuando Google saca versiones nuevas.
@@ -717,6 +737,13 @@ interface OrModel {
 
 let orModelsCache: OrModel[] | null = null;
 
+/** Solo para pruebas: las de este fichero comparten un único proceso, así que sin esto la lista de
+ * modelos gratuitos de OpenRouter quedaría cacheada del primer test al resto, aunque cada uno simule
+ * su propia respuesta de "/models". */
+export function resetOpenRouterModelsCacheForTests(): void {
+  orModelsCache = null;
+}
+
 /** Modelos gratuitos de OpenRouter que aceptan imágenes (la lista cambia con el tiempo, así que se consulta). */
 async function freeOpenRouterModels(needsImages: boolean): Promise<string[]> {
   const preferred = [
@@ -809,6 +836,25 @@ async function openRouterOnce(
   emit: Emit,
   signal: AbortSignal,
 ) {
+  // Límite de tiempo TOTAL para esta tanda (ver overallResponseCap): un modelo gratuito saturado puede ir
+  // goteando datos de cuando en cuando sin llegar a quedarse en silencio del todo, y aun así tardar
+  // muchísimos minutos. `signal` (el original) se sigue usando tal cual para distinguir una cancelación
+  // real del usuario («Detener») de este límite; `cap.signal` es el que de verdad viaja en las peticiones.
+  const cap = overallResponseCap(signal);
+  try {
+    return await openRouterOnceCapped(model, req, emit, signal, cap.signal);
+  } finally {
+    cap.clear();
+  }
+}
+
+async function openRouterOnceCapped(
+  model: string,
+  req: ChatRequest,
+  emit: Emit,
+  signal: AbortSignal,
+  capSignal: AbortSignal,
+) {
   const hasFetchTool = !!req.webFetch;
   const messages: OrMessage[] = [
     // A diferencia de Gemini, aquí la herramienta de navegación (fetch_url) no la ejecuta OpenRouter por
@@ -837,7 +883,7 @@ async function openRouterOnce(
   if (hasFetchTool) {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let data: { choices?: Array<{ message?: OrMessage; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number }; error?: { message?: string; code?: number } };
-      const toolConnect = connectTimeout(signal);
+      const toolConnect = connectTimeout(capSignal);
       let toolRes: Response;
       try {
         toolRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -886,7 +932,7 @@ async function openRouterOnce(
     // herramientas, con lo que se haya conseguido leer hasta ahora en el propio historial de mensajes.
   }
 
-  const mainConnect = connectTimeout(signal);
+  const mainConnect = connectTimeout(capSignal);
   let res: Response;
   try {
     res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -943,7 +989,7 @@ async function openRouterOnce(
   const unsafeGuard = createUnsafeGuard((text) => emit({ type: "text", text }));
   try {
     await midStream(
-      signal,
+      capSignal,
       () => emitted,
       () =>
         readSse(
@@ -984,7 +1030,7 @@ async function openRouterOnce(
                 output: j.usage.completion_tokens ?? 0,
               };
           },
-          signal,
+          capSignal,
         ),
     );
   } catch (err) {
@@ -1040,7 +1086,12 @@ export async function streamOpenRouter(
         break;
       }
     }
-    if (!(last instanceof ProviderError) || !last.tryNext) break;
+    // Se prueba con el siguiente modelo gratuito si este estaba saturado (ProviderError con tryNext) O si
+    // falló por red/tiempo agotado (incluido el límite de 90 s de toda la respuesta, ver
+    // overallResponseCap): antes, un fallo de este segundo tipo hacía que se abandonara entero tras
+    // agotar los reintentos del PRIMER modelo, sin llegar a probar los demás modelos gratuitos.
+    const retryableNow = last instanceof ProviderError ? last.tryNext : isNetworkError(last);
+    if (!retryableNow) break;
   }
   const e = last as ProviderError;
   if (e?.status === 429)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { connectTimeout, streamGemini, streamOpenRouter, transcribeAudio } from "../src/lib/freeAi";
+import { connectTimeout, overallResponseCap, resetOpenRouterModelsCacheForTests, streamGemini, streamOpenRouter, transcribeAudio } from "../src/lib/freeAi";
 import { detectProvider } from "../src/db/db";
 import type { ChatStreamEvent } from "../shared/types";
 
@@ -112,6 +112,34 @@ describe("IA gratuita", () => {
     const events: ChatStreamEvent[] = [];
     await streamOpenRouter(makeReq("k-or-400"), (e) => events.push(e), new AbortController().signal);
     expect(seen.length).toBe(2); // probó un segundo modelo en vez de rendirse en el primero
+    expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
+  });
+
+  it("OpenRouter: si un modelo falla por red/tiempo agotado (no un error del proveedor), también se prueba el siguiente modelo en vez de rendirse", async () => {
+    // Antes, un fallo así (p. ej. el límite de tiempo total de toda la respuesta, ver overallResponseCap,
+    // o cualquier "Load failed") hacía que se abandonara entero tras agotar los reintentos del PRIMER
+    // modelo, sin llegar a probar los demás modelos gratuitos: por eso la pantalla se podía quedar
+    // cargando mucho rato con un modelo lento/saturado en vez de pasar a otro más disponible.
+    resetOpenRouterModelsCacheForTests();
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models"))
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "a/modelo-lento:free", context_length: 100000, architecture: { input_modalities: ["text", "image"] } },
+              { id: "b/modelo-bueno:free", context_length: 100000, architecture: { input_modalities: ["text", "image"] } },
+            ],
+          }),
+        );
+      const model = JSON.parse(String(init!.body)).model;
+      seen.push(model);
+      if (model === "a/modelo-lento:free") throw new TypeError("Load failed");
+      return sse([{ choices: [{ delta: { content: "ok" } }] }, { choices: [{ delta: {}, finish_reason: "stop" }] }, "[DONE]"]);
+    });
+    const events: ChatStreamEvent[] = [];
+    await streamOpenRouter(makeReq("k-or-lento"), (e) => events.push(e), new AbortController().signal);
+    expect(seen).toEqual(["a/modelo-lento:free", "a/modelo-lento:free", "b/modelo-bueno:free"]);
     expect(events.some((e) => e.type === "text" && e.text === "ok")).toBe(true);
   });
 
@@ -271,6 +299,29 @@ describe("connectTimeout (límite de tiempo SOLO para conectar, no para toda la 
     const user = new AbortController();
     const { signal, clear } = connectTimeout(user.signal, 20);
     clear();
+    user.abort();
+    expect(signal.aborted).toBe(true);
+  });
+});
+
+describe("overallResponseCap (límite de tiempo para TODA la respuesta, no solo para conectar)", () => {
+  it("si la respuesta tarda más del límite total (aunque vaya goteando datos sin quedarse en silencio), aborta", async () => {
+    const { signal } = overallResponseCap(new AbortController().signal, 20);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(signal.aborted).toBe(true);
+    expect((signal.reason as Error)?.name).toBe("TimeoutError");
+  });
+
+  it("si se llama a clear() a tiempo, no aborta", async () => {
+    const { signal, clear } = overallResponseCap(new AbortController().signal, 20);
+    clear();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(signal.aborted).toBe(false);
+  });
+
+  it("el usuario sigue pudiendo cancelar de verdad aunque el límite de tiempo no haya saltado", () => {
+    const user = new AbortController();
+    const { signal } = overallResponseCap(user.signal, 20_000);
     user.abort();
     expect(signal.aborted).toBe(true);
   });
