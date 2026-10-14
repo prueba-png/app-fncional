@@ -1,0 +1,5 @@
+# Configuración del servidor de descarga (Cloudflare Worker, plan gratuito).
+# No hace falta tocar nada: al desplegar, Cloudflare lo usa tal cual.
+name = "devstudio-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"

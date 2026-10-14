@@ -1,2 +1,3 @@
 # app-fncional
-Aprender desde nada
+
+Proyecto personal. Uso privado.
