@@ -542,9 +542,16 @@ ${r?`
 
   function call(method, body) {
     var isForm = body instanceof FormData;
+    // OJO con la cabecera: "application/json" hace que el navegador mande antes una petición
+    // "preflight" (OPTIONS) por ser una petición "no simple"; la Bot API de Telegram no responde bien a
+    // esa petición preflight (no es una API pensada para llamarse desde el navegador), así que el
+    // navegador cancelaba la petición de verdad y el mensaje NUNCA llegaba a enviarse, sin ningún aviso
+    // real del motivo (solo "no se pudo enviar" en la consola de quien rellenara el formulario, que el
+    // dueño de la página nunca llega a ver). Con "text/plain" el navegador la trata como "simple" y no
+    // hace falta preflight; Telegram interpreta el cuerpo como JSON igual, sin mirar esta cabecera.
     return fetch(API + method, {
       method: "POST",
-      headers: isForm ? undefined : { "content-type": "application/json" },
+      headers: isForm ? undefined : { "content-type": "text/plain" },
       body: isForm ? body : JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (j) {
       if (!j.ok) throw new Error(j.description || "Error de Telegram");
