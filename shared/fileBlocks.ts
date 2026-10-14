@@ -11,10 +11,32 @@
 import type { FileMap } from "./types";
 
 /**
+ * Una línea "de contenido real": lo que el usuario de verdad ve y le importa (un título, un párrafo, el
+ * texto de un botón o enlace...), no marcado HTML ni una regla de CSS/JS. Se descarta cualquier línea con
+ * pinta de CSS o JS (con `{`, `}` o `;`, que el texto normal casi nunca lleva) y, del resto, se exige que
+ * quede texto real de sobra quitando las etiquetas (al menos dos palabras de más de dos letras): así una
+ * línea como `<div class="header">` (puro marcado, sin texto) no cuenta como contenido.
+ */
+function isContentLine(line: string): boolean {
+  if (/[{};]/.test(line)) return false;
+  const text = line.replace(/<[^>]*>/g, " ");
+  const words = text.split(/[^a-zA-ZÀ-ÿ]+/).filter((w) => w.length > 2);
+  return words.length >= 2;
+}
+
+/**
  * Qué fracción de las líneas "con contenido" (no triviales) de `oldContent` sigue apareciendo tal cual en
  * `newContent`. Sirve para detectar cuándo la IA ha reescrito un fichero de memoria en vez de partir del
  * contenido real que ya había: un cambio bien aplicado conserva casi todas las líneas no tocadas; una
  * reescritura completa (aunque visualmente se parezca) casi nunca coincide línea por línea con el original.
+ *
+ * Una página suele tener mucho marcado y CSS genérico que CUALQUIER reescritura reproduce de forma
+ * parecida (un reset básico, una estructura de cabecera/sección...), así que comparar línea a línea el
+ * fichero entero puede dar un parecido alto aunque el texto real (títulos, párrafos, nombres propios del
+ * negocio del usuario) se haya sustituido por completo. Por eso, cuando hay suficiente texto real que
+ * comparar, el resultado final es el PEOR de los dos: el parecido de todo el fichero, y el parecido de
+ * solo sus líneas de contenido real. Basta con que una reescritura destruya el contenido real para que se
+ * considere destructiva, aunque conserve el CSS o la estructura general.
  */
 export function unchangedLineRatio(oldContent: string, newContent: string): number {
   const oldLines = oldContent
@@ -25,7 +47,13 @@ export function unchangedLineRatio(oldContent: string, newContent: string): numb
   const newLines = new Set(newContent.split("\n").map((l) => l.trim()));
   let kept = 0;
   for (const l of oldLines) if (newLines.has(l)) kept++;
-  return kept / oldLines.length;
+  const overall = kept / oldLines.length;
+
+  const oldContentLines = oldLines.filter(isContentLine);
+  if (oldContentLines.length < 3) return overall; // muy poco texto real para juzgarlo aparte (p. ej. un CSS)
+  let keptContent = 0;
+  for (const l of oldContentLines) if (newLines.has(l)) keptContent++;
+  return Math.min(overall, keptContent / oldContentLines.length);
 }
 
 export interface ParsedFileChanges {

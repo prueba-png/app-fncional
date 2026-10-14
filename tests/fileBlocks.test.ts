@@ -108,4 +108,48 @@ describe("unchangedLineRatio (detecta reescrituras completas de un fichero exist
     const rewritten = Array.from({ length: 20 }, (_, i) => `  <section id="nueva-${i}">otra cosa ${i}</section>`).join("\n");
     expect(unchangedLineRatio(original, rewritten)).toBeLessThan(0.2);
   });
+
+  it("es bajo también cuando se conserva el CSS/marcado pero se sustituye TODO el contenido real (el fallo real reportado: ninguna línea de código cambia de sitio, pero la página deja de ser la del usuario)", () => {
+    const pagina = (titulo: string, nav: string, subtitulo: string, parrafo: string, extra = "") => `<!DOCTYPE html>
+<html lang="es">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, sans-serif; color: #222; }
+.container { max-width: 960px; margin: 0 auto; padding: 20px; }
+.header { display: flex; justify-content: space-between; align-items: center; }
+.button { background: #6d5dfc; color: white; padding: 10px 20px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>${titulo}</h1>
+<nav>${nav}</nav>
+</div>
+<section>
+<h2>${subtitulo}</h2>
+<p>${parrafo}</p>${extra}
+</section>
+</div>
+</body>
+</html>`;
+    const antes = pagina(
+      "Cafetería El Aroma",
+      '<a href="#menu">Nuestro menú</a><a href="#horario">Horario de apertura</a>',
+      "Café de especialidad recién tostado",
+      "Trabajamos directamente con productores colombianos para traerte el mejor café de temporada.",
+    );
+    // Se pidió solo "añade un botón", pero la IA reconstruyó el contenido de memoria con textos
+    // genéricos: el CSS y la estructura general son IDÉNTICOS (por eso el parecido línea a línea del
+    // fichero entero sale alto), pero no queda ni una sola frase real del negocio del usuario.
+    const despues = pagina(
+      "Mi Negocio Genérico",
+      '<a href="#inicio">Página de inicio</a><a href="#contacto">Contacto directo</a>',
+      "Bienvenido a nuestra web de ejemplo",
+      "Este es un texto de relleno generado automáticamente sin relación con el negocio real.",
+      "\n<button>Nuevo botón añadido</button>",
+    );
+    expect(unchangedLineRatio(antes, despues)).toBeLessThan(0.4);
+  });
 });
