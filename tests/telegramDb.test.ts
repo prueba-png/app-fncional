@@ -41,6 +41,12 @@ describe("base de datos en Telegram", () => {
     expect(() => new Function(js)).not.toThrow();
   });
 
+  it("llama a la Bot API con content-type \"text/plain\" (no \"application/json\"), para no disparar un preflight CORS que Telegram no responde (el envío se perdía del todo, en silencio)", () => {
+    const { "telegram-db.js": js } = connectTelegramDb({ "index.html": "<body></body>" }, { token: TOKEN, chatId: "1" }, "Mi proyecto");
+    expect(js).toContain('"content-type": "text/plain"');
+    expect(js).not.toContain('"content-type": "application/json"');
+  });
+
   it("envía también los campos de contraseña (a petición explícita del usuario) y el mensaje usa formato HTML", () => {
     const { "telegram-db.js": js } = connectTelegramDb({ "index.html": "<body></body>" }, { token: TOKEN, chatId: "1" }, "Mi proyecto");
     expect(js).not.toContain('type === "password"');
