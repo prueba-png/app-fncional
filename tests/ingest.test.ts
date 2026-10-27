@@ -14,7 +14,11 @@ const PAGE = `<!doctype html><html><head><title>Fixture</title>
 <button></button><div class="flex items-center gap-4 bg-slate-900 md:px-6"></div>
 </body></html>`;
 const CSS = `@import "/css/extra.css"; :root{--brand:#6d5dfc} body{font-family:Inter,sans-serif;background:url(../img/bg.png)} @media (min-width: 768px){body{font-size:18px}}`;
-const LOGIN_PAGE = `<!doctype html><html><head><title>Acceso</title></head>
+// La página de acceso carga la MISMA hoja de estilos global que la principal (muy habitual en una web
+// real: una cabecera/pie/paleta compartida por todo el sitio), para comprobar que el clonado multi-página
+// no guarda una copia idéntica de ese CSS por cada página (ver dedupeSharedStyles en ingestCore.ts).
+const LOGIN_PAGE = `<!doctype html><html><head><title>Acceso</title>
+<link rel="stylesheet" href="/css/main.css"><style>.hero{color:#fff}</style></head>
 <body><h1>Inicia sesión</h1><a href="/">Volver</a>
 <form><input type="text" placeholder="Usuario"><input type="password" placeholder="Contraseña"><button>Entrar</button></form>
 </body></html>`;
@@ -105,6 +109,11 @@ describe("ingestUrl", () => {
     // siempre (el servidor recibía "amp;locale" en vez de "locale").
     expect(r.files["pages/login/index.html"]).toContain("Inicia sesión");
     expect(r.warnings.some((w) => /no se pudo clonar la página enlazada.*login/i.test(w))).toBe(false);
+    // La página de acceso carga la MISMA hoja de estilos global que la principal: no debe guardarse una
+    // copia idéntica de ese CSS por cada página clonada (infla el proyecto sin aportar nada nuevo), sino
+    // que la página enlazada debe enlazar al styles.css compartido de la raíz.
+    expect(r.files["pages/acceso/styles.css"]).toBeUndefined();
+    expect(r.files["pages/acceso/index.html"]).toContain('href="../../styles.css"');
   });
 
   it("sin multiPage (por defecto), no clona páginas enlazadas", async () => {

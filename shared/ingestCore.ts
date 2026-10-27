@@ -718,5 +718,43 @@ export async function ingestLinkedPages(
 
   const files: FileMap = { "index.html": rewriteLinks(mainHtml) };
   for (const [path, content] of Object.entries(extraFiles)) files[path] = path.endsWith("/index.html") ? rewriteLinks(content) : content;
-  return { files, warnings };
+  return { files: dedupeSharedStyles(main.files["styles.css"], files), warnings };
+}
+
+/** Quita el comentario de cabecera (URL y hora de la descarga) que `build()` antepone a cada styles.css:
+ * no aporta nada real, y cambia siempre de una página a otra aunque el CSS de debajo sea EXACTAMENTE el
+ * mismo fichero compartido, lo que impediría detectarlo como idéntico. */
+const STYLES_HEADER_RE = /^\/\* Estilos extraídos de .*? — .*? \*\/\n\n/;
+const stripStylesHeader = (css: string): string => css.replace(STYLES_HEADER_RE, "");
+
+/**
+ * Cada página enlazada se clona de forma independiente (`ingestWithFetcher` por separado, sin saber qué
+ * descargaron las demás), así que si varias páginas de la misma web cargan la MISMA hoja de estilos
+ * global (una cabecera, un pie, una paleta de colores compartida por todo el sitio, muy habitual en
+ * webs reales), el resultado guardaba una copia idéntica de ese CSS por cada página clonada: con varias
+ * páginas, eso puede inflar muchísimo el tamaño total del proyecto sin añadir nada nuevo, y es justo lo
+ * que hacía que clones grandes no cupieran en el límite de ninguna IA. Aquí se detectan los
+ * `pages/<carpeta>/styles.css` que son EXACTAMENTE el mismo CSS que el de la página principal (ignorando
+ * el comentario de cabecera, que siempre cambia) y se sustituyen por un enlace al styles.css compartido
+ * de la raíz, en vez de guardar una copia de más. Solo se comparan con el de la página PRINCIPAL (no
+ * entre ellas), así que si varias páginas comparten un CSS distinto al de la principal, no se detecta:
+ * es un caso más raro, y evita el riesgo de fundir por error dos hojas de estilos que solo coinciden
+ * por casualidad.
+ */
+function dedupeSharedStyles(mainStylesCss: string | undefined, files: FileMap): FileMap {
+  if (!mainStylesCss) return files;
+  const mainNormalized = stripStylesHeader(mainStylesCss);
+  const out = { ...files };
+  for (const path of Object.keys(out)) {
+    if (!path.startsWith("pages/") || !path.endsWith("/styles.css")) continue;
+    if (stripStylesHeader(out[path]) !== mainNormalized) continue;
+    const pagePath = `${path.slice(0, -"styles.css".length)}index.html`;
+    const html = out[pagePath];
+    if (html == null) continue;
+    const linkRe = /(<link[^>]*\shref=")styles\.css(")/i;
+    if (!linkRe.test(html)) continue;
+    out[pagePath] = html.replace(linkRe, "$1../../styles.css$2");
+    delete out[path];
+  }
+  return out;
 }
